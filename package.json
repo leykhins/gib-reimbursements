@@ -1,0 +1,37 @@
+{
+  "name": "nuxt-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.758.0",
+    "@aws-sdk/lib-storage": "^3.758.0",
+    "@aws-sdk/s3-request-presigner": "^3.758.0",
+    "@nuxtjs/supabase": "^1.5.0",
+    "@supabase/supabase-js": "^2.49.1",
+    "@vueuse/core": "^12.8.2",
+    "aws-amplify": "^6.13.4",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cookie": "^1.0.2",
+    "date-fns": "^4.1.0",
+    "lucide-vue-next": "^0.477.0",
+    "nuxt": "^3.15.4",
+    "reka-ui": "^2.0.2",
+    "shadcn-nuxt": "^1.0.2",
+    "tailwind-merge": "^3.0.2",
+    "tailwindcss-animate": "^1.0.7",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@nuxtjs/tailwindcss": "^6.13.1",
+    "typescript": "^5.8.2"
+  }
+}
