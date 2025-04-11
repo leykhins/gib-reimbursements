@@ -1,6 +1,5 @@
 import { defineEventHandler, readBody } from 'h3'
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { createClient } from '@supabase/supabase-js'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -15,38 +14,29 @@ export default defineEventHandler(async (event) => {
       })
     }
     
-    // Get AWS config
+    // Get Supabase config
     const config = useRuntimeConfig()
+    
+    // Initialize Supabase client
+    const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey)
     
     // Generate unique file name
     const key = `receipts/${Date.now()}-${fileName}`
     
-    // Initialize S3 client
-    const s3Client = new S3Client({
-      region: config.public.awsRegion,
-      credentials: {
-        accessKeyId: config.awsAccessKeyId,
-        secretAccessKey: config.awsSecretAccessKey
-      }
-    })
+    // Create a signed URL for uploads
+    const { data, error } = await supabase.storage
+      .from('receipts')
+      .createSignedUploadUrl(key)
     
-    // Create command for S3 PutObject
-    const command = new PutObjectCommand({
-      Bucket: config.public.awsS3BucketName,
-      Key: key,
-      ContentType: fileType
-    })
+    if (error) throw error
     
-    // Generate pre-signed URL
-    const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 }) // URL expires in 5 minutes
-    
-    // Return the pre-signed URL and key
+    // Return the signed URL and key
     return {
-      uploadUrl: presignedUrl,
+      uploadUrl: data.signedUrl,
       key: key
     }
   } catch (error) {
-    console.error('Error generating pre-signed URL:', error)
+    console.error('Error generating signed URL:', error)
     throw createError({
       statusCode: 500,
       statusMessage: `Failed to generate upload URL: ${error.message}`

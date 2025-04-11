@@ -22,11 +22,6 @@ const reimbursementRequests = ref([])
 const loading = ref(true)
 const error = ref(null)
 
-// Get AWS config from runtime config
-const config = useRuntimeConfig()
-const awsRegion = config.public.awsRegion
-const awsS3BucketName = config.public.awsS3BucketName
-
 // Store signed URLs for receipts
 const receiptSignedUrls = ref({})
 

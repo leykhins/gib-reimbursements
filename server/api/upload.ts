@@ -1,9 +1,12 @@
 // server/api/upload.ts
 import { defineEventHandler, readMultipartFormData } from 'h3'
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { createClient } from '@supabase/supabase-js'
 
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
+  
+  // Initialize Supabase client
+  const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey)
   
   // Parse multipart form data
   const formData = await readMultipartFormData(event)
@@ -28,35 +31,29 @@ export default defineEventHandler(async (event) => {
   const userId = userIdField ? userIdField.data.toString() : 'unknown'
   
   // Generate file name
-  const fileName = `receipts/${userId}-${Date.now()}.${fileField.filename?.split('.').pop() || 'jpg'}`
-  
-  // Initialize S3 client
-  const s3Client = new S3Client({
-    region: config.public.awsRegion,
-    credentials: {
-      accessKeyId: config.awsAccessKeyId,
-      secretAccessKey: config.awsSecretAccessKey
-    }
-  })
+  const fileName = `${userId}-${Date.now()}.${fileField.filename?.split('.').pop() || 'jpg'}`
   
   try {
-    // Upload to S3
-    const command = new PutObjectCommand({
-      Bucket: config.public.awsS3BucketName,
-      Key: fileName,
-      Body: fileField.data,
-      ContentType: fileField.type || 'application/octet-stream',
-      ACL: 'public-read'
-    })
+    // Upload to Supabase Storage
+    const { data, error } = await supabase.storage
+      .from('receipts')
+      .upload(fileName, fileField.data, {
+        contentType: fileField.type || 'application/octet-stream',
+        upsert: false
+      })
     
-    await s3Client.send(command)
+    if (error) throw error
     
-    // Return the S3 URL
+    // Get public URL for the file
+    const { data: urlData } = supabase.storage
+      .from('receipts')
+      .getPublicUrl(fileName)
+    
     return {
-      url: `https://${config.public.awsS3BucketName}.s3.${config.public.awsRegion}.amazonaws.com/${fileName}`
+      url: urlData.publicUrl
     }
   } catch (error) {
-    console.error('Error uploading to S3:', error)
+    console.error('Error uploading to Supabase Storage:', error)
     throw createError({
       statusCode: 500,
       statusMessage: `Failed to upload file: ${error.message}`
