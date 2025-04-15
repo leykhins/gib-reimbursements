@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { LogOut, Settings } from 'lucide-vue-next'
+import { LogOut, Settings, Home, LayoutDashboard } from 'lucide-vue-next'
 import { useSupabaseClient, useSupabaseUser } from '#imports'
 import { useRouter } from 'vue-router'
 import { ref, onMounted } from 'vue'
@@ -21,7 +21,8 @@ const router = useRouter()
 const profile = ref({
   first_name: '',
   last_name: '',
-  email: ''
+  email: '',
+  role: ''
 })
 
 // Fetch user profile data on component mount
@@ -30,7 +31,7 @@ onMounted(async () => {
     // Fetch user profile data from public.users table
     const { data, error } = await client
       .from('users')
-      .select('first_name, last_name, email')
+      .select('first_name, last_name, email, role')
       .eq('id', user.value.id)
       .single()
     
@@ -67,6 +68,50 @@ const getFullName = () => {
   return 'User'
 }
 
+// Navigate to dashboard based on role
+const navigateToDashboard = (prefix) => {
+  navigateTo(`/${prefix}/`)
+}
+
+// Dashboard navigation items based on user role
+const getDashboardItems = () => {
+  const items = []
+  
+  // Employee dashboard is available to all users
+  items.push({
+    label: 'Employee Dashboard',
+    prefix: 'e',
+    available: true
+  })
+  
+  // Role-specific dashboards
+  if (profile.value.role === 'admin' || profile.value.role === 'manager') {
+    items.push({
+      label: 'Manager Dashboard',
+      prefix: 'm',
+      available: true
+    })
+  }
+  
+  if (profile.value.role === 'admin' || profile.value.role === 'accounting') {
+    items.push({
+      label: 'Accounting Dashboard',
+      prefix: 'f',
+      available: true
+    })
+  }
+  
+  if (profile.value.role === 'admin') {
+    items.push({
+      label: 'Admin Dashboard',
+      prefix: 'a',
+      available: true
+    })
+  }
+  
+  return items
+}
+
 // Logout function
 const handleLogout = async () => {
   await client.auth.signOut()
@@ -89,6 +134,22 @@ const handleLogout = async () => {
         </div>
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
+      
+      <!-- Dashboard Switcher -->
+      <DropdownMenuLabel v-if="getDashboardItems().length > 1">
+        <span class="text-xs text-muted-foreground">Switch Dashboard</span>
+      </DropdownMenuLabel>
+      <DropdownMenuItem 
+        v-for="item in getDashboardItems()"
+        :key="item.prefix"
+        @click="navigateToDashboard(item.prefix)"
+        class="cursor-pointer"
+      >
+        <LayoutDashboard class="mr-2 h-4 w-4" />
+        <span>{{ item.label }}</span>
+      </DropdownMenuItem>
+      <DropdownMenuSeparator v-if="getDashboardItems().length > 1" />
+      
       <DropdownMenuItem @click="navigateTo('/e/settings')" class="cursor-pointer">
         <Settings class="mr-2 h-4 w-4" />
         <span>Settings</span>

@@ -56,7 +56,7 @@
             {{ isLogin ? 'Sign Up' : 'Login' }}
           </Button>
           </div>
-          <NuxtLink to="/reset_password" >
+          <NuxtLink to="/request_password_reset" >
             <Button variant="link" class="p-0 ml-1">
               Forgot Password?
             </Button>

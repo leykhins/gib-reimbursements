@@ -28,6 +28,9 @@ const uploadProgress = ref<Record<number, number>>({})
 const receiptUrls = ref<Record<number, string>>({})
 const receiptPaths = ref<Record<number, string>>({})
 
+// Define constants for mileage calculation
+const MILEAGE_RATE = 0.61 // $0.61 per kilometer
+
 // Define expense type
 interface Expense {
   id: number
@@ -71,6 +74,20 @@ const categories = [
   { value: 'car', label: 'Car Mileage' },
   { value: 'transport', label: 'Public Transport' }
 ]
+
+// Calculate the mileage amount automatically
+const calculateMileageAmount = (distance: string) => {
+  if (!distance || isNaN(parseFloat(distance))) return '0.00'
+  return (parseFloat(distance) * MILEAGE_RATE).toFixed(2)
+}
+
+// Update amount when distance changes for car mileage
+const updateMileageAmount = (expenseId: number) => {
+  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+  if (expenseIndex !== -1 && expenses.value[expenseIndex].category === 'car') {
+    expenses.value[expenseIndex].amount = calculateMileageAmount(expenses.value[expenseIndex].distance || '0')
+  }
+}
 
 // Add a new expense form
 const addExpense = () => {
@@ -238,9 +255,9 @@ const submitExpenses = async () => {
     // Get the current user's ID
     if (!user.value) throw new Error('User not authenticated')
     
-    // Check if all files are uploaded
+    // Check if all non-car expense files are uploaded
     for (const expense of expenses.value) {
-      if (!receiptPaths.value[expense.id]) {
+      if (expense.category !== 'car' && !receiptPaths.value[expense.id]) {
         throw new Error(`Receipt for expense #${expense.id} is not uploaded`)
       }
     }
@@ -279,7 +296,7 @@ const confirmSubmit = async () => {
           travel_type: isTravel ? (expense.category === 'car' ? 'car' : 'public_transport') : null,
           start_location: expense.startLocation || null,
           destination: expense.destination || null,
-          receipt_url: receiptPaths.value[expense.id],
+          receipt_url: receiptPaths.value[expense.id] || null, // Make receipt_url optional
           status: 'pending',
           category: expense.category,
           created_at: new Date().toISOString(),
@@ -421,8 +438,8 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                 </select>
               </div>
               
-              <!-- Amount -->
-              <div class="space-y-2">
+              <!-- Amount (hidden for car mileage) -->
+              <div v-if="expense.category !== 'car'" class="space-y-2">
                 <Label for="amount">Amount ($)</Label>
                 <Input 
                   id="amount" 
@@ -435,7 +452,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
               </div>
               
               <!-- Description -->
-              <div class="space-y-2 md:col-span-2">
+              <div class="space-y-2" :class="{ 'md:col-span-2': expense.category !== 'car', 'md:col-span-1': expense.category === 'car' }">
                 <Label for="description">Description</Label>
                 <textarea 
                   id="description" 
@@ -480,8 +497,22 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                       type="number" 
                       v-model="expense.distance" 
                       placeholder="0" 
+                      @input="updateMileageAmount(expense.id)"
                       required
                     />
+                  </div>
+                  
+                  <!-- Calculated Amount (read-only) -->
+                  <div class="space-y-2">
+                    <Label for="calculated-amount">Amount ($)</Label>
+                    <Input 
+                      id="calculated-amount" 
+                      type="text" 
+                      :value="expense.amount" 
+                      readonly
+                      class="bg-gray-100"
+                    />
+                    <p class="text-xs text-gray-500">Based on $0.61/km</p>
                   </div>
                 </div>
               </div>
@@ -514,7 +545,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                     class="hidden" 
                     accept="image/*,.pdf" 
                     @change="(e) => handleFileUpload(e, expense.id)"
-                    required
+                    :required="expense.category !== 'car'"
                   />
                   <label :for="`receipt-${expense.id}`" class="cursor-pointer">
                     <div class="flex flex-col items-center justify-center">
@@ -524,6 +555,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                       </p>
                       <p class="text-responsive-xs text-gray-500 mt-1">
                         JPG, PNG or PDF (max. 10MB)
+                        <span v-if="expense.category === 'car'"> - Optional for mileage</span>
                       </p>
                       
                       <!-- Progress bar for upload -->

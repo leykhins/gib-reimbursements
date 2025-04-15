@@ -346,7 +346,8 @@ const assignDepartment = async () => {
   }
   
   try {
-    const { error } = await client
+    // First update the user's department
+    const { error: userError } = await client
       .from('users')
       .update({
         department: departmentManagerForm.value.department,
@@ -354,7 +355,30 @@ const assignDepartment = async () => {
       })
       .eq('id', selectedUser.value.id)
     
-    if (error) throw error
+    if (userError) throw userError
+    
+    // If user is a manager, also update department_managers table
+    if (selectedUser.value.role === 'manager') {
+      // Check if manager already has this department
+      const { data: existingAssignment } = await client
+        .from('department_managers')
+        .select('*')
+        .eq('manager_id', selectedUser.value.id)
+        .eq('department', departmentManagerForm.value.department)
+        .single()
+      
+      if (!existingAssignment) {
+        // Create new department manager assignment
+        const { error: dmError } = await client
+          .from('department_managers')
+          .insert({
+            department: departmentManagerForm.value.department,
+            manager_id: selectedUser.value.id
+          })
+        
+        if (dmError) throw dmError
+      }
+    }
     
     toast({
       title: 'Success',
