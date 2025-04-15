@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,6 +9,7 @@ import { Calendar } from '@/components/ui/calendar'
 import { CalendarIcon, Plus, Trash2, Upload, ArrowLeft, Check, X } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { format } from 'date-fns'
+import { GoogleApis } from 'vue'
 
 // Add showConfirmModal ref
 const showConfirmModal = ref(false)
@@ -28,8 +29,22 @@ const uploadProgress = ref<Record<number, number>>({})
 const receiptUrls = ref<Record<number, string>>({})
 const receiptPaths = ref<Record<number, string>>({})
 
+// Get the runtime config
+const config = useRuntimeConfig()
+
 // Define constants for mileage calculation
 const MILEAGE_RATE = 0.61 // $0.61 per kilometer
+
+// Add Google Maps API configuration - use API key from environment
+const GOOGLE_MAPS_API_KEY = config.public.googleMapsApiKey || ''
+let autocompleteStart = null
+let autocompleteEnd = null
+let distanceMatrixService = null
+
+// Keep existing refs and add new ones
+const isGoogleMapsLoaded = ref(false)
+const calculatedDistance = ref(null)
+const calculatedDuration = ref(null)
 
 // Define expense type
 interface Expense {
@@ -359,6 +374,149 @@ const handleDateChange = (expenseId: number, dateString: string) => {
     expenses.value[expenseIndex].date = new Date(dateString)
   }
 }
+
+// Function to initialize Google Maps and related services
+const initGoogleMaps = () => {
+  if (window.google && window.google.maps) {
+    isGoogleMapsLoaded.value = true
+    
+    // Initialize the Distance Matrix service
+    distanceMatrixService = new window.google.maps.DistanceMatrixService()
+    
+    // Setup autocomplete 
+    // We'll call this whenever a car expense is visible
+    setupAutocomplete()
+
+    // Watch for category changes to initialize autocomplete when car is selected
+    watch(expenses, (newExpenses) => {
+      // Check if any expense is a car expense
+      const hasCar = newExpenses.some(e => e.category === 'car')
+      if (hasCar) {
+        // Wait for DOM to update before initializing autocomplete
+        nextTick(() => {
+          setupAutocomplete()
+        })
+      }
+    }, { deep: true })
+  }
+}
+
+// Modified function to setup the Google Places Autocomplete
+const setupAutocomplete = () => {
+  // Find all the input elements for car expenses
+  const startInput = document.getElementById('startLocation')
+  const endInput = document.getElementById('destination')
+  
+  if (!startInput || !endInput) {
+    console.warn("Cannot find start/destination inputs")
+    return
+  }
+  
+  try {
+    // Only recreate the autocomplete if it hasn't been initialized already for this input
+    if (!startInput.getAttribute('data-autocomplete-initialized')) {
+      const options = {
+        types: ['address'],
+        componentRestrictions: { country: 'ca' }
+      }
+      
+      autocompleteStart = new window.google.maps.places.Autocomplete(startInput, options)
+      startInput.setAttribute('data-autocomplete-initialized', 'true')
+      
+      // Use the place_changed event to update the model
+      autocompleteStart.addListener('place_changed', () => {
+        const place = autocompleteStart.getPlace()
+        if (place && place.formatted_address) {
+          // Find current car expense
+          const expenseIndex = expenses.value.findIndex(e => e.category === 'car')
+          if (expenseIndex !== -1) {
+            // Update the startLocation value
+            expenses.value[expenseIndex].startLocation = place.formatted_address
+          }
+          calculateDistance()
+        }
+      })
+    }
+    
+    if (!endInput.getAttribute('data-autocomplete-initialized')) {
+      const options = {
+        types: ['address'],
+        componentRestrictions: { country: 'ca' }
+      }
+      
+      autocompleteEnd = new window.google.maps.places.Autocomplete(endInput, options)
+      endInput.setAttribute('data-autocomplete-initialized', 'true')
+      
+      autocompleteEnd.addListener('place_changed', () => {
+        const place = autocompleteEnd.getPlace()
+        if (place && place.formatted_address) {
+          // Find current car expense
+          const expenseIndex = expenses.value.findIndex(e => e.category === 'car')
+          if (expenseIndex !== -1) {
+            // Update the destination value
+            expenses.value[expenseIndex].destination = place.formatted_address
+          }
+          calculateDistance()
+        }
+      })
+    }
+  } catch (error) {
+    console.error("Error setting up autocomplete:", error)
+  }
+}
+
+// Modified calculate distance function to check if we have addresses
+const calculateDistance = () => {
+  if (!autocompleteStart || !autocompleteEnd) return
+  
+  const startPlace = autocompleteStart.getPlace()
+  const endPlace = autocompleteEnd.getPlace()
+  
+  // Only calculate if both places have been selected
+  if (startPlace?.formatted_address && endPlace?.formatted_address && 
+      startPlace.geometry && endPlace.geometry) {
+    const request = {
+      origins: [startPlace.formatted_address],
+      destinations: [endPlace.formatted_address],
+      travelMode: 'DRIVING',
+      unitSystem: window.google.maps.UnitSystem.METRIC
+    }
+    
+    distanceMatrixService.getDistanceMatrix(request, (response, status) => {
+      if (status === 'OK') {
+        const results = response.rows[0].elements[0]
+        if (results.status === 'OK') {
+          // Get distance in kilometers
+          const distanceInMeters = results.distance.value
+          const distanceInKm = distanceInMeters / 1000
+          calculatedDistance.value = distanceInKm.toFixed(2)
+          calculatedDuration.value = results.duration.text
+          
+          // Update the distance field in the expense form
+          const expenseIndex = expenses.value.findIndex(e => e.category === 'car')
+          if (expenseIndex !== -1) {
+            expenses.value[expenseIndex].distance = calculatedDistance.value
+            updateMileageAmount(expenses.value[expenseIndex].id)
+          }
+        }
+      }
+    })
+  }
+}
+
+// Load Google Maps API script
+onMounted(() => {
+  if (!window.google) {
+    const script = document.createElement('script')
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
+    script.async = true
+    script.defer = true
+    script.onload = initGoogleMaps
+    document.head.appendChild(script)
+  } else {
+    initGoogleMaps()
+  }
+})
 </script>
 
 <template>
@@ -466,26 +624,35 @@ const handleDateChange = (expenseId: number, dateString: string) => {
               <!-- Car Mileage specific fields -->
               <div v-if="expense.category === 'car'" class="space-y-2 md:col-span-2">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <!-- Start Location -->
+                  <!-- Start Location with Google Autocomplete -->
                   <div class="space-y-2">
-                    <Label for="startLocation">Start Location</Label>
+                    <Label for="startLocation">Start Address</Label>
                     <Input 
                       id="startLocation" 
                       v-model="expense.startLocation" 
-                      placeholder="Enter starting point" 
+                      placeholder="Enter Start Address" 
+                      autocomplete="off"
                       required
                     />
                   </div>
                   
-                  <!-- Destination -->
+                  <!-- Destination with Google Autocomplete -->
                   <div class="space-y-2">
-                    <Label for="destination">Destination</Label>
+                    <Label for="destination">Destination Address</Label>
                     <Input 
                       id="destination" 
                       v-model="expense.destination" 
-                      placeholder="Enter destination" 
+                      placeholder="Enter Destination Address" 
+                      autocomplete="off"
                       required
                     />
+                  </div>
+                  
+                  <!-- Display the calculated distance info (without button) -->
+                  <div v-if="calculatedDistance" class="space-y-2 md:col-span-2">
+                    <div class="text-sm text-green-600 mt-1">
+                      Google Maps: {{ calculatedDistance }} km ({{ calculatedDuration }})
+                    </div>
                   </div>
                   
                   <!-- Total Distance -->
@@ -497,8 +664,12 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                       v-model="expense.distance" 
                       placeholder="0" 
                       @input="updateMileageAmount(expense.id)"
+                      readonly
                       required
                     />
+                    <p v-if="calculatedDistance" class="text-xs text-green-600">
+                      Auto-calculated from addresses above
+                    </p>
                   </div>
                   
                   <!-- Calculated Amount (read-only) -->

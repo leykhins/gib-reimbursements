@@ -29,7 +29,8 @@ export default defineNuxtConfig({
     // Public (available on client)
     public: {
       supabaseUrl: process.env.SUPABASE_URL,
-      supabaseKey: process.env.SUPABASE_KEY
+      supabaseKey: process.env.SUPABASE_KEY,
+      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY
     }
   },
   supabase: {
