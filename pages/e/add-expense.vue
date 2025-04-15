@@ -68,7 +68,6 @@ uploadProgress.value[1] = 0
 // Categories for dropdown
 const categories = [
   { value: 'general', label: 'General Expense' },
-  { value: 'travel', label: 'Travel' },
   { value: 'meals', label: 'Meals & Entertainment' },
   { value: 'supplies', label: 'Office Supplies' },
   { value: 'car', label: 'Car Mileage' },
@@ -363,7 +362,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
 </script>
 
 <template>
-  <div class="container mx-auto py-6">
+  <div class="mx-auto">
     <div class="flex items-center mb-6">
       <Button variant="ghost" @click="goBack" class="mr-2">
         <ArrowLeft class="h-4 w-4 mr-2" />
@@ -452,7 +451,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
               </div>
               
               <!-- Description -->
-              <div class="space-y-2" :class="{ 'md:col-span-2': expense.category !== 'car', 'md:col-span-1': expense.category === 'car' }">
+              <div v-if="expense.category !== 'car'" class="space-y-2" :class="{ 'md:col-span-2': expense.category !== 'car' }">
                 <Label for="description">Description</Label>
                 <textarea 
                   id="description" 
@@ -534,7 +533,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
               </div>
               
               <!-- Receipt Upload with immediate upload -->
-              <div class="space-y-2 md:col-span-2">
+              <div v-if="expense.category !== 'car'" class="space-y-2 md:col-span-2">
                 <Label for="receipt">Receipt</Label>
                 
                 <!-- If no receipt is uploaded yet -->
@@ -545,7 +544,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                     class="hidden" 
                     accept="image/*,.pdf" 
                     @change="(e) => handleFileUpload(e, expense.id)"
-                    :required="expense.category !== 'car'"
+                    required
                   />
                   <label :for="`receipt-${expense.id}`" class="cursor-pointer">
                     <div class="flex flex-col items-center justify-center">
@@ -555,7 +554,6 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                       </p>
                       <p class="text-responsive-xs text-gray-500 mt-1">
                         JPG, PNG or PDF (max. 10MB)
-                        <span v-if="expense.category === 'car'"> - Optional for mileage</span>
                       </p>
                       
                       <!-- Progress bar for upload -->
