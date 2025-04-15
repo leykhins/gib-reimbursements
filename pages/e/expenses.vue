@@ -6,8 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { CalendarIcon, ChevronLeft, ChevronRight, Search, Filter, FileText, ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { format } from 'date-fns'
+import { useToast } from '@/components/ui/toast'
 
 definePageMeta({
   layout: 'employee',
@@ -21,6 +23,11 @@ const reimbursementRequests = ref([])
 const filteredRequests = ref([])
 const loading = ref(true)
 const error = ref(null)
+const { toast } = useToast()
+
+// Add these variables for receipt viewing
+const viewingReceipt = ref(false)
+const currentReceiptUrl = ref('')
 
 // Pagination
 const itemsPerPage = 12
@@ -206,15 +213,26 @@ const formatDate = (dateString) => {
 // Status badge class
 const getStatusClass = (status) => {
   switch (status) {
+    case 'pending':
+      return 'bg-yellow-100 text-yellow-800'
+    case 'admin_verified':
+    case 'manager_approved':
+      return 'bg-blue-100 text-blue-800'
+    case 'completed':
     case 'approved':
       return 'bg-green-100 text-green-800'
     case 'rejected':
       return 'bg-red-100 text-red-800'
-    case 'processing':
-      return 'bg-blue-100 text-blue-800'
     default:
       return 'bg-gray-100 text-gray-800'
   }
+}
+
+// Add helper function to format status text
+const formatStatus = (status) => {
+  return status.split('_').map(word => 
+    word.charAt(0).toUpperCase() + word.slice(1)
+  ).join(' ')
 }
 
 // Get expense category label
@@ -269,6 +287,27 @@ const getJobTotal = (jobNumber) => {
 watch(filters, () => {
   applyFilters()
 }, { deep: true })
+
+// Add viewReceipt function
+const viewReceipt = async (receiptUrl) => {
+  if (!receiptUrl) return
+  
+  try {
+    if (!receiptSignedUrls.value[receiptUrl]) {
+      await getReceiptUrl(receiptUrl, receiptUrl)
+    }
+    
+    currentReceiptUrl.value = receiptSignedUrls.value[receiptUrl]
+    viewingReceipt.value = true
+  } catch (err) {
+    console.error('Error getting signed URL:', err)
+    toast({
+      title: 'Error',
+      description: 'Could not load receipt',
+      variant: 'destructive'
+    })
+  }
+}
 
 // Fetch data on component mount
 onMounted(() => {
@@ -413,20 +452,21 @@ onMounted(() => {
                     </td>
                     <td class="px-4 py-3">{{ formatCurrency(request.amount) }}</td>
                     <td class="px-4 py-3">
-                      <span :class="['px-2 py-1 rounded-full text-xs', getStatusClass(request.status)]">
-                        {{ request.status }}
+                      <span :class="['px-2 py-1 rounded-full text-xs font-medium', getStatusClass(request.status)]">
+                        {{ formatStatus(request.status) }}
                       </span>
                     </td>
                     <td class="px-4 py-3">
-                      <a 
-                        v-if="receiptSignedUrls[request.id]" 
-                        :href="receiptSignedUrls[request.id]" 
-                        target="_blank"
-                        class="text-blue-600 hover:underline"
+                      <Button 
+                        v-if="receiptSignedUrls[request.id] || request.receipt_url" 
+                        variant="outline" 
+                        size="sm"
+                        @click.stop="viewReceipt(request.receipt_url)"
+                        class="flex items-center"
                       >
+                        <FileText class="h-4 w-4 mr-2" />
                         View Receipt
-                      </a>
-                      <span v-else-if="request.receipt_url" class="text-gray-400">Loading...</span>
+                      </Button>
                       <span v-else class="text-gray-400">No receipt</span>
                     </td>
                   </tr>
@@ -468,4 +508,20 @@ onMounted(() => {
       </CardContent>
     </Card>
   </div>
+  
+  <!-- Receipt Viewer Dialog -->
+  <Dialog v-model:open="viewingReceipt">
+    <DialogContent class="max-w-4xl">
+      <DialogHeader>
+        <DialogTitle>Receipt</DialogTitle>
+      </DialogHeader>
+      <div class="h-[70vh] overflow-auto">
+        <iframe 
+          v-if="currentReceiptUrl" 
+          :src="currentReceiptUrl" 
+          class="w-full h-full"
+        ></iframe>
+      </div>
+    </DialogContent>
+  </Dialog>
 </template>
