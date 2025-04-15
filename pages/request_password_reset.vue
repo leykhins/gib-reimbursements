@@ -57,6 +57,10 @@
 <script setup>
 import { Loader2, AlertCircle, CheckCircle } from 'lucide-vue-next'
 
+definePageMeta({
+  title: 'Forgot Password'
+})
+
 const client = useSupabaseClient()
 const email = ref('')
 const loading = ref(false)

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useSupabaseClient, useSupabaseUser } from '#imports'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import TopNav from '@/components/TopNav.vue'
 import { 
   Home,
@@ -16,10 +16,12 @@ import {
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
+import Sidebar from '@/components/Sidebar.vue'
 
 const client = useSupabaseClient()
 const user = useSupabaseUser()
 const router = useRouter()
+const route = useRoute()
 const isManager = ref(false)
 const isSidebarOpen = ref(false)
 
@@ -69,6 +71,13 @@ const checkManagerStatus = async () => {
 // Initialize component
 onMounted(async () => {
   await checkManagerStatus()
+})
+
+useHead({
+  title: route.meta.title || 'Manager Dashboard',
+  titleTemplate: (title) => {
+    return title ? `${title} - Gibraltar Reimbursements` : 'Gibraltar Reimbursements'
+  }
 })
 </script>
 

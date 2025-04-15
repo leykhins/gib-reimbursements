@@ -5,7 +5,13 @@
 </template>
 
 <script setup>
+const route = useRoute()
+
 useHead({
+  title: route.meta.title || 'Gibraltar Reimbursements',
+  titleTemplate: (title) => {
+    return title ? `${title} - Gibraltar Reimbursements` : 'Gibraltar Reimbursements'
+  },
   link: [
     {
       rel: 'preconnect',

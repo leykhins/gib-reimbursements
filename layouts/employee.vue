@@ -2,7 +2,9 @@
 import { ref } from 'vue'
 import TopNav from '@/components/TopNav.vue'
 import Sidebar from '@/components/Sidebar.vue'
+import { useRoute } from 'vue-router'
 
+const route = useRoute()
 const isSidebarOpen = ref(false)
 
 const toggleSidebar = () => {
@@ -12,6 +14,13 @@ const toggleSidebar = () => {
 const closeSidebar = () => {
   isSidebarOpen.value = false
 }
+
+useHead({
+  title: route.meta.title || 'Employee Dashboard',
+  titleTemplate: (title) => {
+    return title ? `${title} - Gibraltar Reimbursements` : 'Gibraltar Reimbursements'
+  }
+})
 </script>
 
 <template>

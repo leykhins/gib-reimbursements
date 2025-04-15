@@ -12,7 +12,8 @@ import { Button } from '@/components/ui/button'
 
 definePageMeta({
   layout: 'employee',
-  middleware: ['auth', 'employee']
+  middleware: ['auth', 'employee'],
+  title: 'Employee Dashboard'
 })
 
 // Use Supabase client and user

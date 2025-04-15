@@ -47,6 +47,12 @@
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
+
+        <Alert v-if="successMessage" variant="default" class="mt-4">
+          <CheckCircle class="h-4 w-4" />
+          <AlertTitle>Success</AlertTitle>
+          <AlertDescription>{{ successMessage }}</AlertDescription>
+        </Alert>
       </CardContent>
       <CardFooter>
         <div class="flex flex-col text-center w-full text-sm">
@@ -82,7 +88,11 @@
 </template>
 
 <script setup>
-import { Loader2, AlertCircle } from 'lucide-vue-next'
+import { Loader2, AlertCircle, CheckCircle } from 'lucide-vue-next'
+
+definePageMeta({
+  title: 'Login'
+})
 
 const client = useSupabaseClient()
 const user = useSupabaseUser()
@@ -93,6 +103,7 @@ const password = ref('')
 const loading = ref(false)
 const error = ref(null)
 const isLogin = ref(true)
+const successMessage = ref(null)
 
 // Redirect if already logged in
 onMounted(() => {
@@ -110,6 +121,7 @@ watch(user, (newUser) => {
 
 const handleLogin = async () => {
   error.value = null
+  successMessage.value = null
   loading.value = true
   
   try {
@@ -126,11 +138,15 @@ const handleLogin = async () => {
       // Sign up
       const { error: signUpError } = await client.auth.signUp({
         email: email.value,
-        password: password.value
+        password: password.value,
+        options: {
+          emailRedirectTo: `${window.location.origin}/confirm`
+        }
       })
       
       if (signUpError) throw signUpError
-      // Redirect will happen via the user watcher
+      
+      successMessage.value = "Account created successfully! Please check your email for a verification link."
     }
   } catch (e) {
     error.value = e.message

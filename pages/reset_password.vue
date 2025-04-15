@@ -61,6 +61,10 @@
   <script setup>
   import { Loader2, AlertCircle, CheckCircle } from 'lucide-vue-next'
   
+  definePageMeta({
+    title: 'Reset Password'
+  })
+  
   const client = useSupabaseClient()
   const router = useRouter()
   const route = useRoute()
