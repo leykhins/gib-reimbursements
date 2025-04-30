@@ -1,104 +1,216 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { DollarSign, Clock, CheckCircle, FileText } from 'lucide-vue-next'
-
-definePageMeta({
-  layout: 'accounting',
-  middleware: ['accountant']
-})
-
-// Use Supabase client and user
-const client = useSupabaseClient()
-const user = useSupabaseUser()
-const loading = ref(true)
-const error = ref(null)
-
-// Dashboard stats
-const stats = ref({
-  pendingPayments: 0,
-  processedPayments: 0,
-  totalReimbursed: 0,
-  pendingAmount: 0
-})
-
-// Recent reimbursement requests
-const recentRequests = ref([])
-
-onMounted(async () => {
-  try {
-    loading.value = true
-    
-    // Fetch dashboard stats
-    const { data: pendingData, error: pendingError } = await client
-      .from('reimbursement_requests')
-      .select('id, amount')
-      .eq('status', 'manager_approved')
-      .is('accounting_processed_at', null)
-    
-    if (pendingError) throw pendingError
-    
-    const { data: processedData, error: processedError } = await client
-      .from('reimbursement_requests')
-      .select('id, amount')
-      .eq('status', 'completed')
-      .not('accounting_processed_at', 'is', null)
-      .order('accounting_processed_at', { ascending: false })
-      .limit(10)
-    
-    if (processedError) throw processedError
-    
-    // Calculate stats
-    stats.value.pendingPayments = pendingData.length
-    stats.value.processedPayments = processedData.length
-    stats.value.pendingAmount = pendingData.reduce((sum, req) => sum + parseFloat(req.amount), 0)
-    stats.value.totalReimbursed = processedData.reduce((sum, req) => sum + parseFloat(req.amount), 0)
-    
-    // Fetch recent requests for the dashboard
-    const { data: recentData, error: recentError } = await client
-      .from('reimbursement_requests')
-      .select(`
-        id, 
-        employee_id,
-        job_number,
-        description,
-        amount,
-        status,
-        created_at,
-        users:employee_id(first_name, last_name, department)
-      `)
-      .eq('status', 'manager_approved')
-      .order('created_at', { ascending: false })
-      .limit(5)
-    
-    if (recentError) throw recentError
-    recentRequests.value = recentData
-    
-  } catch (err) {
-    error.value = err.message
-    console.error('Error fetching dashboard data:', err)
-  } finally {
-    loading.value = false
-  }
-})
-
-// Format currency
-const formatCurrency = (amount) => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD'
-  }).format(amount)
-}
-
-// Format date
-const formatDate = (dateString) => {
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
+  import { ref, computed, onMounted } from 'vue'
+  import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
+  import { Button } from '@/components/ui/button'
+  import { DollarSign, Clock, CheckCircle, FileText, ArrowUpRight } from 'lucide-vue-next'
+  import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+  import { toast } from '@/components/ui/toast'
+  
+  definePageMeta({
+    layout: 'accounting',
+    middleware: ['accountant']
   })
-}
+  
+  // Use Supabase client and user
+  const client = useSupabaseClient()
+  const user = useSupabaseUser()
+  const loading = ref(true)
+  const error = ref(null)
+  
+  // Dashboard stats
+  const stats = ref({
+    pendingPayments: 0,
+    processedPayments: 0,
+    totalReimbursed: 0,
+    pendingAmount: 0
+  })
+  
+  // Recent claims
+  const recentClaims = ref([])
+  
+  onMounted(async () => {
+    try {
+      loading.value = true
+      
+      // Fetch dashboard stats for pending claims
+      const { data: pendingData, error: pendingError } = await client
+        .from('claims')
+        .select('id, amount, gst_amount, pst_amount')
+        .eq('status', 'approved')
+        .is('accounting_processed_at', null)
+      
+      if (pendingError) throw pendingError
+      
+      // Fetch processed claims
+      const { data: processedData, error: processedError } = await client
+        .from('claims')
+        .select('id, amount, gst_amount, pst_amount')
+        .eq('status', 'processed')
+        .not('accounting_processed_at', 'is', null)
+        .order('accounting_processed_at', { ascending: false })
+        .limit(10)
+      
+      if (processedError) throw processedError
+      
+      // Calculate stats with tax amounts included
+      stats.value.pendingPayments = pendingData.length
+      stats.value.processedPayments = processedData.length
+      stats.value.pendingAmount = pendingData.reduce((sum, claim) => {
+        const total = parseFloat(claim.amount) + 
+                     (claim.gst_amount ? parseFloat(claim.gst_amount) : 0) + 
+                     (claim.pst_amount ? parseFloat(claim.pst_amount) : 0)
+        return sum + total
+      }, 0)
+      stats.value.totalReimbursed = processedData.reduce((sum, claim) => {
+        const total = parseFloat(claim.amount) + 
+                     (claim.gst_amount ? parseFloat(claim.gst_amount) : 0) + 
+                     (claim.pst_amount ? parseFloat(claim.pst_amount) : 0)
+        return sum + total
+      }, 0)
+      
+      // Fetch recent manager-approved claims with category and subcategory info
+      const { data: recentData, error: recentError } = await client
+        .from('claims')
+        .select(`
+          id, 
+          employee_id,
+          job_number,
+          license_number,
+          description,
+          amount,
+          gst_amount,
+          pst_amount,
+          status,
+          date,
+          category_id,
+          subcategory_mapping_id,
+          users:employee_id(first_name, last_name, department)
+        `)
+        .eq('status', 'approved')
+        .order('date', { ascending: false })
+        .limit(5)
+      
+      if (recentError) throw recentError
+      
+      // If we have claims, fetch their categories and subcategories
+      if (recentData.length > 0) {
+        const claimsWithCategories = await Promise.all(recentData.map(async (claim) => {
+          // Get category
+          const { data: categoryData } = await client
+            .from('claim_categories')
+            .select('category_name')
+            .eq('id', claim.category_id)
+            .single()
+          
+          // Get subcategory through mapping
+          const { data: mappingData } = await client
+            .from('category_subcategory_mapping')
+            .select('subcategory_id')
+            .eq('id', claim.subcategory_mapping_id)
+            .single()
+            
+          if (mappingData) {
+            const { data: subcategoryData } = await client
+              .from('claim_subcategories')
+              .select('subcategory_name')
+              .eq('id', mappingData.subcategory_id)
+              .single()
+              
+            return {
+              ...claim,
+              category_name: categoryData?.category_name,
+              subcategory_name: subcategoryData?.subcategory_name
+            }
+          }
+          
+          return {
+            ...claim,
+            category_name: categoryData?.category_name,
+            subcategory_name: null
+          }
+        }))
+        
+        recentClaims.value = claimsWithCategories
+      }
+      
+    } catch (err) {
+      error.value = err.message
+      console.error('Error fetching dashboard data:', err)
+    } finally {
+      loading.value = false
+    }
+  })
+  
+  // Format currency
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-CA', {
+      style: 'currency',
+      currency: 'CAD'
+    }).format(amount || 0)
+  }
+  
+  // Format date
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-CA', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  }
+  
+  // Calculate total claim amount including taxes
+  const getTotalAmount = (claim) => {
+    const baseAmount = parseFloat(claim.amount || 0)
+    const gst = parseFloat(claim.gst_amount || 0)
+    const pst = parseFloat(claim.pst_amount || 0)
+    return baseAmount + gst + pst
+  }
+  
+  // Mark claim as processed
+  const markAsProcessed = async (claimId) => {
+    try {
+      loading.value = true
+      
+      const { error: updateError } = await client
+        .from('claims')
+        .update({
+          status: 'completed',
+          accounting_processed_by: user.value.id,
+          accounting_processed_at: new Date().toISOString(),
+        })
+        .eq('id', claimId)
+      
+      if (updateError) throw updateError
+      
+      // Remove the processed claim from the list
+      recentClaims.value = recentClaims.value.filter(claim => claim.id !== claimId)
+      
+      // Update stats
+      const processedClaim = recentClaims.value.find(claim => claim.id === claimId)
+      if (processedClaim) {
+        const amount = getTotalAmount(processedClaim)
+        stats.value.pendingPayments--
+        stats.value.pendingAmount -= amount
+        stats.value.processedPayments++
+        stats.value.totalReimbursed += amount
+      }
+      
+      toast({
+        title: 'Success',
+        description: 'Claim marked as processed successfully',
+        variant: 'default'
+      })
+    } catch (err) {
+      console.error('Error processing claim:', err)
+      toast({
+        title: 'Error',
+        description: 'Failed to process claim',
+        variant: 'destructive'
+      })
+    } finally {
+      loading.value = false
+    }
+  }
 </script>
 
 <template>
@@ -113,7 +225,7 @@ const formatDate = (dateString) => {
     
     <div v-else>
       <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
           <CardHeader class="pb-2">
             <CardTitle class="text-sm font-medium">Pending Payments</CardTitle>
@@ -158,75 +270,104 @@ const formatDate = (dateString) => {
             </p>
           </CardContent>
         </Card>
+
+        <NuxtLink to="/f/process" class="block h-full text-center">
+          <Card class="text-center cursor-pointer hover:bg-gray-50">
+            <CardHeader class="pb-2">
+            </CardHeader>
+            <CardContent class="flex flex-col items-center justify-center">
+              <Clock class="h-6 w-6 mb-2" />
+            </CardContent>
+            <CardFooter class="flex items-center justify-center text-sm gap-2">
+              <p>Process Pending Requests</p>
+              <ArrowUpRight class="h-4 w-4" />
+            </CardFooter>
+          </Card>
+        </NuxtLink>
         
-        <Card>
-          <CardHeader class="pb-2">
-            <CardTitle class="text-sm font-medium">Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div class="flex flex-col space-y-2">
-              <NuxtLink to="/m/expenses">
-                <Button variant="outline" class="w-full justify-start">
-                  <FileText class="mr-2 h-4 w-4" />
-                  View All Expenses
-                </Button>
-              </NuxtLink>
-              <NuxtLink to="/m/pending">
-                <Button variant="outline" class="w-full justify-start">
-                  <Clock class="mr-2 h-4 w-4" />
-                  Process Pending
-                </Button>
-              </NuxtLink>
-            </div>
-          </CardContent>
-        </Card>
+        <NuxtLink to="/f/expenses" class="block h-full">
+          <Card class="text-center content-center cursor-pointer hover:bg-gray-50">
+            <CardHeader class="pb-2">
+            </CardHeader>
+            <CardContent class="flex flex-col items-center justify-center">
+              <FileText class="h-6 w-6 mb-2" />
+            </CardContent>
+            <CardFooter class="flex items-center justify-center text-sm gap-2">
+              <p>View All Expenses</p>
+              <ArrowUpRight class="h-4 w-4" />
+            </CardFooter>
+          </Card>
+        </NuxtLink>
       </div>
       
       <!-- Recent Requests -->
       <Card class="mt-6">
         <CardHeader>
-          <CardTitle>Recent Reimbursement Requests</CardTitle>
-          <CardDescription>Pending manager-approved requests</CardDescription>
+          <CardTitle>Approved Reimbursement Requests</CardTitle>
+          <CardDescription>Manager-approved requests ready for payment processing</CardDescription>
         </CardHeader>
         <CardContent>
           <div class="overflow-x-auto">
-            <table class="w-full">
-              <thead>
-                <tr class="border-b">
-                  <th class="text-left py-2 px-4 font-medium">Employee</th>
-                  <th class="text-left py-2 px-4 font-medium">Department</th>
-                  <th class="text-left py-2 px-4 font-medium">Job #</th>
-                  <th class="text-left py-2 px-4 font-medium">Description</th>
-                  <th class="text-left py-2 px-4 font-medium">Amount</th>
-                  <th class="text-left py-2 px-4 font-medium">Status</th>
-                  <th class="text-left py-2 px-4 font-medium">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="request in recentRequests" :key="request.id" class="border-b hover:bg-muted/50">
-                  <td class="py-2 px-4">{{ request.users?.first_name }} {{ request.users?.last_name }}</td>
-                  <td class="py-2 px-4">{{ request.users?.department }}</td>
-                  <td class="py-2 px-4">{{ request.job_number }}</td>
-                  <td class="py-2 px-4">{{ request.description }}</td>
-                  <td class="py-2 px-4">{{ formatCurrency(request.amount) }}</td>
-                  <td class="py-2 px-4">
-                    <span 
-                      class="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800"
+            <Table>
+              <TableHeader class="bg-gray-100">
+                <TableRow>
+                  <TableHead class="uppercase text-xs font-medium">Reference #</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Employee</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Category</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Description</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Amount</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Date</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="claim in recentClaims" :key="claim.id">
+                  <TableCell class="text-xs py-3">
+                    <template v-if="claim.license_number">
+                      License: {{ claim.license_number }}
+                    </template>
+                    <template v-else>
+                      Job: {{ claim.job_number || 'N/A' }}
+                    </template>
+                  </TableCell>
+                  <TableCell class="text-xs py-3">
+                    {{ claim.users?.first_name }} {{ claim.users?.last_name }}
+                    <div class="text-muted-foreground">{{ claim.users?.department }}</div>
+                  </TableCell>
+                  <TableCell class="text-xs py-3">
+                    <div class="font-medium">{{ claim.category_name }}</div>
+                    <div class="text-muted-foreground">{{ claim.subcategory_name }}</div>
+                  </TableCell>
+                  <TableCell class="text-xs py-3">
+                    <div class="font-medium">{{ claim.description }}</div>
+                  </TableCell>
+                  <TableCell class="text-xs py-3">
+                    <div>{{ formatCurrency(claim.amount) }}</div>
+                    <div class="text-muted-foreground">
+                      GST: {{ formatCurrency(claim.gst_amount || 0) }}<br>
+                      PST: {{ formatCurrency(claim.pst_amount || 0) }}
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-xs py-3">{{ formatDate(claim.date) }}</TableCell>
+                  <TableCell class="py-3">
+                    <Button 
+                      size="sm" 
+                      class="h-7 bg-green-600 hover:bg-green-700 text-white"
+                      @click="markAsProcessed(claim.id)"
                     >
-                      {{ request.status.replace(/_/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') }}
-                    </span>
-                  </td>
-                  <td class="py-2 px-4">{{ formatDate(request.created_at) }}</td>
-                </tr>
-                <tr v-if="recentRequests.length === 0">
-                  <td colspan="7" class="py-4 text-center text-muted-foreground">No pending manager-approved requests found</td>
-                </tr>
-              </tbody>
-            </table>
+                      Process
+                    </Button>
+                  </TableCell>
+                </TableRow>
+                <TableRow v-if="recentClaims.length === 0">
+                  <TableCell colSpan="7" class="py-4 text-center text-muted-foreground">No pending claims for accounting processing</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
           </div>
           <div class="mt-4 flex justify-end">
-            <NuxtLink to="/m/expenses">
-              <Button variant="outline">View All Expenses</Button>
+            <NuxtLink to="/f/process">
+              <Button variant="outline" size="sm" class="text-xs">View All Pending Requests</Button>
             </NuxtLink>
           </div>
         </CardContent>

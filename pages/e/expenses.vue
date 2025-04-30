@@ -4,16 +4,33 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { CalendarIcon, ChevronLeft, ChevronRight, Search, Filter, FileText, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { 
+  CalendarIcon, 
+  ChevronLeft, 
+  ChevronRight, 
+  Search, 
+  Filter, 
+  FileText, 
+  ChevronDown, 
+  ChevronUp,
+  DollarSign,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  CheckCircle
+} from 'lucide-vue-next'
 import { format } from 'date-fns'
-import { useToast } from '@/components/ui/toast'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { toast } from '@/components/ui/toast'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Skeleton } from '@/components/ui/skeleton'
 
 definePageMeta({
   layout: 'employee',
-  middleware: ['auth', 'employee']
+  middleware: ['employee']
 })
 
 // Use Supabase client and user
@@ -23,124 +40,81 @@ const reimbursementRequests = ref([])
 const filteredRequests = ref([])
 const loading = ref(true)
 const error = ref(null)
-const { toast } = useToast()
-
-// Add these variables for receipt viewing
+const categories = ref([])
 const viewingReceipt = ref(false)
 const currentReceiptUrl = ref('')
 
-// Pagination
-const itemsPerPage = 12
-const currentPage = ref(1)
-const totalPages = computed(() => Math.ceil(Object.keys(groupedRequests.value).length / itemsPerPage))
+// Expanded sections tracking
+const expandedCategories = ref({})
+const expandedJobs = ref({})
 
 // Filters
 const filters = ref({
   jobNumber: '',
-  expenseType: '',
+  categoryId: '',
+  subcategoryId: '',
   dateFrom: null,
-  dateTo: null
+  dateTo: null,
+  employeeName: '',
+  status: ''
 })
-
-// Categories from add-expense page
-const categories = {
-  'general': 'General Expense',
-  'travel': 'Travel',
-  'meals': 'Meals & Entertainment',
-  'supplies': 'Office Supplies',
-  'car': 'Car Mileage',
-  'transport': 'Public Transport'
-}
 
 // Store signed URLs for receipts
 const receiptSignedUrls = ref({})
 
-// Track expanded job groups
-const expandedGroups = ref({})
+// Add these new refs after the existing refs
+const selectedYear = ref(new Date().getFullYear())
+const selectedMonth = ref(new Date().getMonth())
+const selectedRequests = ref(new Set())
+const years = ref([])
+const months = [
+  'January', 'February', 'March', 'April', 'May', 'June', 
+  'July', 'August', 'September', 'October', 'November', 'December'
+]
 
-// Group expenses by job number and sort by date
-const groupedRequests = computed(() => {
-  const groups = {}
-  
-  filteredRequests.value.forEach(request => {
-    const jobNumber = request.job_number
-    
-    if (!groups[jobNumber]) {
-      groups[jobNumber] = []
-    }
-    
-    groups[jobNumber].push(request)
-  })
-  
-  // Sort expenses within each group by date (newest first)
-  Object.keys(groups).forEach(jobNumber => {
-    groups[jobNumber].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-  })
-  
-  return groups
-})
-
-// Get paginated job numbers
-const paginatedJobNumbers = computed(() => {
-  const jobNumbers = Object.keys(groupedRequests.value)
-  const start = (currentPage.value - 1) * itemsPerPage
-  const end = start + itemsPerPage
-  return jobNumbers.slice(start, end)
-})
-
-// Function to get correct URL for receipt
-const getReceiptUrl = async (url, requestId) => {
-  if (!url) return null
-  
-  // If it's already a full URL, return it as is
-  if (url.startsWith('http')) {
-    receiptSignedUrls.value[requestId] = url
-    return url
-  }
-  
+// Fetch categories and subcategories
+const fetchCategories = async () => {
   try {
-    // Get signed URL from Supabase storage (authenticated)
-    const { data, error } = await client.storage
-      .from('receipts')
-      .createSignedUrl(url, 60 * 60) // 1 hour expiry
+    const { data: categoryData, error: categoryError } = await client
+      .from('expense_categories')
+      .select(`
+        id,
+        name,
+        expense_subcategories (
+          id,
+          name
+        )
+      `)
+      .order('name')
     
-    if (error) throw error
-    
-    // Store the signed URL
-    receiptSignedUrls.value[requestId] = data?.signedUrl || null
-    return data?.signedUrl || null
+    if (categoryError) throw categoryError
+    categories.value = categoryData || []
   } catch (err) {
-    console.error('Error getting signed URL:', err)
-    return null
+    console.error('Error fetching categories:', err)
+    toast({
+      title: 'Error',
+      description: 'Failed to load expense categories',
+      variant: 'destructive'
+    })
   }
 }
 
-// Prepare signed URLs for all receipts after fetching data
-const prepareReceiptUrls = async () => {
-  for (const jobNumber of paginatedJobNumbers.value) {
-    if (expandedGroups.value[jobNumber]) {
-      for (const request of groupedRequests.value[jobNumber]) {
-        if (request.receipt_url && !receiptSignedUrls.value[request.id]) {
-          await getReceiptUrl(request.receipt_url, request.id)
-        }
-      }
-    }
-  }
-}
-
-// Fetch reimbursement requests for the current user
+// Fetch reimbursement requests
 const fetchReimbursementRequests = async () => {
   try {
     loading.value = true
     error.value = null
     
-    if (!user.value) {
-      throw new Error('User not authenticated')
-    }
-    
     const { data, error: fetchError } = await client
-      .from('reimbursement_requests')
-      .select('*')
+      .from('claims')
+      .select(`
+        *,
+        category:category_id(id, category_name),
+        subcategory_mapping:subcategory_mapping_id(
+          id,
+          subcategory:subcategory_id(id, subcategory_name)
+        )
+      `)
       .eq('employee_id', user.value.id)
       .order('created_at', { ascending: false })
     
@@ -149,55 +123,97 @@ const fetchReimbursementRequests = async () => {
     reimbursementRequests.value = data || []
     applyFilters()
   } catch (err) {
-    console.error('Error fetching reimbursement requests:', err)
+    console.error('Error fetching claims:', err)
     error.value = err.message
   } finally {
     loading.value = false
   }
 }
 
-// Apply filters to the reimbursement requests
+// Apply filters to reimbursement requests
 const applyFilters = () => {
   filteredRequests.value = reimbursementRequests.value.filter(request => {
-    // Filter by job number
-    if (filters.value.jobNumber && !request.job_number.includes(filters.value.jobNumber)) {
-      return false
-    }
+    const requestDate = new Date(request.created_at)
+    const requestMonth = requestDate.getMonth()
+    const requestYear = requestDate.getFullYear()
     
-    // Filter by expense type (travel or non-travel)
-    if (filters.value.expenseType) {
-      if (filters.value.expenseType === 'travel' && !request.is_travel) {
-        return false
-      }
-      if (filters.value.expenseType === 'non-travel' && request.is_travel) {
-        return false
-      }
-    }
-    
-    // Filter by date range
-    const createdAt = new Date(request.created_at)
-    if (filters.value.dateFrom && createdAt < filters.value.dateFrom) {
-      return false
-    }
-    if (filters.value.dateTo) {
-      const dateTo = new Date(filters.value.dateTo)
-      dateTo.setHours(23, 59, 59, 999) // End of the day
-      if (createdAt > dateTo) {
-        return false
-      }
-    }
-    
-    return true
+    return requestMonth === selectedMonth.value && requestYear === selectedYear.value
   })
   
-  // Reset to first page when filters change
-  currentPage.value = 1
+  // Set all categories to expanded by default
+  sortedCategoryKeys.value.forEach(categoryId => {
+    expandedCategories.value[categoryId] = true
+  })
   
-  // Reset expanded groups
-  expandedGroups.value = {}
+  // Reset job expansions and selections
+  expandedJobs.value = {}
+  selectedRequests.value.clear()
 }
 
-// Format currency
+// Organize data by employee
+const organizedData = computed(() => {
+  const organized = {}
+  
+  filteredRequests.value.forEach(claim => {
+    const categoryId = claim.category_id
+    const categoryName = claim.category?.category_name || 'Uncategorized'
+    const jobNumber = claim.job_number || 'No Job Number'
+    
+    if (!organized[categoryId]) {
+      organized[categoryId] = {
+        id: categoryId,
+        name: categoryName,
+        jobs: {},
+        total: 0
+      }
+    }
+    
+    if (!organized[categoryId].jobs[jobNumber]) {
+      organized[categoryId].jobs[jobNumber] = {
+        claims: [],
+        total: 0
+      }
+    }
+    
+    organized[categoryId].jobs[jobNumber].claims.push(claim)
+    const totalAmount = (parseFloat(claim.amount) || 0) + 
+                       (parseFloat(claim.gst_amount) || 0) + 
+                       (parseFloat(claim.pst_amount) || 0)
+    organized[categoryId].jobs[jobNumber].total += totalAmount
+    organized[categoryId].total += totalAmount
+  })
+  
+  return organized
+})
+
+// Get sorted employee keys
+const sortedCategoryKeys = computed(() => {
+  return Object.keys(organizedData.value).sort((a, b) => {
+    const catA = organizedData.value[a]
+    const catB = organizedData.value[b]
+    return catA.name.localeCompare(catB.name)
+  })
+})
+
+// Get sorted category keys for an employee
+const getSortedJobKeys = (categoryId) => {
+  const category = organizedData.value[categoryId]
+  if (!category) return []
+  
+  return Object.keys(category.jobs).sort()
+}
+
+// Toggle expansion functions
+const toggleCategory = (categoryId) => {
+  expandedCategories.value[categoryId] = !expandedCategories.value[categoryId]
+}
+
+const toggleJob = (categoryId, jobNumber) => {
+  const key = `${categoryId}-${jobNumber}`
+  expandedJobs.value[key] = !expandedJobs.value[key]
+}
+
+// Format helpers
 const formatCurrency = (amount) => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -205,99 +221,28 @@ const formatCurrency = (amount) => {
   }).format(amount)
 }
 
-// Format date
 const formatDate = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy')
 }
 
-// Status badge class
-const getStatusClass = (status) => {
-  switch (status) {
-    case 'pending':
-      return 'bg-yellow-100 text-yellow-800'
-    case 'admin_verified':
-    case 'manager_approved':
-      return 'bg-blue-100 text-blue-800'
-    case 'completed':
-    case 'approved':
-      return 'bg-green-100 text-green-800'
-    case 'rejected':
-      return 'bg-red-100 text-red-800'
-    default:
-      return 'bg-gray-100 text-gray-800'
-  }
-}
-
-// Add helper function to format status text
 const formatStatus = (status) => {
   return status.split('_').map(word => 
     word.charAt(0).toUpperCase() + word.slice(1)
   ).join(' ')
 }
 
-// Get expense category label
-const getExpenseCategory = (request) => {
-  // Use the category column directly if available
-  if (request.category) {
-    return categories[request.category] || 'Uncategorized';
-  }
-  
-  // Fallback to the old logic for backward compatibility
-  if (request.is_travel) {
-    return request.travel_type === 'car' ? categories.car : categories.transport;
-  }
-  return categories.general;
-}
-
-// Toggle group expansion
-const toggleGroup = async (jobNumber) => {
-  expandedGroups.value[jobNumber] = !expandedGroups.value[jobNumber]
-  
-  // Load receipt URLs when expanding a group
-  if (expandedGroups.value[jobNumber]) {
-    for (const request of groupedRequests.value[jobNumber]) {
-      if (request.receipt_url && !receiptSignedUrls.value[request.id]) {
-        await getReceiptUrl(request.receipt_url, request.id)
-      }
-    }
-  }
-}
-
-// Pagination controls
-const nextPage = () => {
-  if (currentPage.value < totalPages.value) {
-    currentPage.value++
-    prepareReceiptUrls()
-  }
-}
-
-const prevPage = () => {
-  if (currentPage.value > 1) {
-    currentPage.value--
-    prepareReceiptUrls()
-  }
-}
-
-// Calculate total amount for a job number
-const getJobTotal = (jobNumber) => {
-  return groupedRequests.value[jobNumber].reduce((sum, request) => sum + parseFloat(request.amount), 0)
-}
-
-// Watch for filter changes
-watch(filters, () => {
-  applyFilters()
-}, { deep: true })
-
-// Add viewReceipt function
+// Receipt handling
 const viewReceipt = async (receiptUrl) => {
   if (!receiptUrl) return
   
   try {
-    if (!receiptSignedUrls.value[receiptUrl]) {
-      await getReceiptUrl(receiptUrl, receiptUrl)
-    }
+    const { data, error } = await client.storage
+      .from('receipts')
+      .createSignedUrl(receiptUrl, 60)
     
-    currentReceiptUrl.value = receiptSignedUrls.value[receiptUrl]
+    if (error) throw error
+    
+    currentReceiptUrl.value = data.signedUrl
     viewingReceipt.value = true
   } catch (err) {
     console.error('Error getting signed URL:', err)
@@ -309,219 +254,485 @@ const viewReceipt = async (receiptUrl) => {
   }
 }
 
-// Fetch data on component mount
-onMounted(() => {
-  fetchReimbursementRequests()
+// Status badge class
+const getStatusClass = (status) => {
+  switch (status) {
+    case 'manager_approved':
+      return 'bg-green-100 text-green-800'
+    case 'completed':
+      return 'bg-purple-100 text-purple-800'
+    case 'admin_verified':
+      return 'bg-blue-100 text-blue-800'
+    case 'pending':
+      return 'bg-yellow-100 text-yellow-800'
+    case 'rejected':
+      return 'bg-red-100 text-red-800'
+    default:
+      return 'bg-gray-100 text-gray-800'
+  }
+}
+
+// Watch for filter changes
+watch(filters, () => {
+  applyFilters()
+}, { deep: true })
+
+// Selected category subcategories
+const selectedCategorySubcategories = computed(() => {
+  if (!filters.value.categoryId) return []
+  const category = categories.value.find(c => c.id === filters.value.categoryId)
+  return category?.expense_subcategories || []
+})
+
+// Watch for category changes to reset subcategory
+watch(() => filters.value.categoryId, () => {
+  filters.value.subcategoryId = ''
+})
+
+// Add these new methods
+const changeMonth = (newMonth) => {
+  selectedMonth.value = newMonth
+  applyFilters()
+}
+
+const changeYear = (newYear) => {
+  selectedYear.value = newYear
+  applyFilters()
+}
+
+// Add bulk approval methods
+const toggleEmployeeSelection = (employeeId, checked) => {
+  const employee = organizedData.value[employeeId]
+  
+  // Create a new Set to ensure reactivity
+  const newSelectedRequests = new Set(selectedRequests.value)
+  
+  // Collect all pending requests for this employee
+  Object.values(employee.jobs).forEach(job => {
+    job.claims.forEach(claim => {
+      if (claim.status === 'pending') {
+        if (checked) {
+          newSelectedRequests.add(claim.id)
+        } else {
+          newSelectedRequests.delete(claim.id)
+        }
+      }
+    })
+  })
+  
+  // Assign the new Set to trigger reactivity
+  selectedRequests.value = newSelectedRequests
+}
+
+const isEmployeeFullySelected = (employeeId) => {
+  const employee = organizedData.value[employeeId]
+  const pendingRequests = []
+  
+  Object.values(employee.jobs).forEach(job => {
+    job.claims.forEach(claim => {
+      if (claim.status === 'pending') {
+        pendingRequests.push(claim.id)
+      }
+    })
+  })
+  
+  return pendingRequests.length > 0 && 
+         pendingRequests.every(id => selectedRequests.value.has(id))
+}
+
+const verifySelectedRequests = async () => {
+  try {
+    const promises = Array.from(selectedRequests.value).map(requestId => 
+      client
+        .from('claims')
+        .update({
+          status: 'admin_verified',
+          admin_verified_by: user.value.id,
+          admin_verified_at: new Date().toISOString()
+        })
+        .eq('id', requestId)
+    )
+    
+    await Promise.all(promises)
+    
+    toast({
+      title: 'Success',
+      description: 'Selected requests verified successfully',
+      variant: 'default'
+    })
+    
+    // Refresh the list and clear selections
+    selectedRequests.value.clear()
+    await fetchReimbursementRequests()
+  } catch (err) {
+    console.error('Error verifying requests:', err)
+    toast({
+      title: 'Error',
+      description: 'Failed to verify some requests',
+      variant: 'destructive'
+    })
+  }
+}
+
+// Add this new function to fetch unique years from claims
+const fetchAvailableYears = async () => {
+  try {
+    const { data, error } = await client
+      .from('claims')
+      .select('created_at')
+      .eq('employee_id', user.value.id)
+    
+    if (error) throw error
+    
+    // Extract unique years from claims
+    const uniqueYears = new Set(
+      data.map(claim => new Date(claim.created_at).getFullYear())
+    )
+    
+    // Add current year if not present
+    const currentYear = new Date().getFullYear()
+    uniqueYears.add(currentYear)
+    
+    // Sort years in descending order
+    years.value = Array.from(uniqueYears).sort((a, b) => b - a)
+    
+    // Set selected year to most recent year
+    if (years.value.length > 0) {
+      selectedYear.value = years.value[0]
+    }
+  } catch (err) {
+    console.error('Error fetching available years:', err)
+    // Fallback to current year if there's an error
+    const currentYear = new Date().getFullYear()
+    years.value = [currentYear]
+    selectedYear.value = currentYear
+  }
+}
+
+// Initialize
+onMounted(async () => {
+  await fetchAvailableYears()
+  await fetchCategories()
+  await fetchReimbursementRequests()
 })
 </script>
 
 <template>
   <div class="space-y-6">
     <div class="flex justify-between items-center">
-      <h1 class="text-2xl font-bold">Expense History</h1>
-      <Button @click="navigateTo('/e/add-expense')">
-        <FileText class="mr-2 h-4 w-4" />
-        New Expense
-      </Button>
+      <h1 class="text-xl font-bold">Reimbursements History</h1>
     </div>
     
-    <!-- Filters -->
-    <Card>
-      <CardHeader>
-        <CardTitle class="text-lg">Filters</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <!-- Job Number Filter -->
-          <div>
-            <Label for="job-number">Job Number</Label>
-            <Input id="job-number" v-model="filters.jobNumber" placeholder="Filter by job number" />
-          </div>
-          
-          <!-- Expense Type Filter -->
-          <div>
-            <Label for="expense-type">Expense Type</Label>
-            <select 
-              id="expense-type" 
-              v-model="filters.expenseType"
-              class="w-full px-3 py-2 border border-gray-300 rounded-md"
+    <!-- Month navigation tabs -->
+    <div class="flex flex-col lg:flex-row items-stretch lg:items-center text-responsive-base gap-2">
+      <div class="w-full lg:w-32 text-sm">
+        <Select v-model="selectedYear">
+          <SelectTrigger class="h-8 w-full">
+            <div class="flex items-center">
+              <CalendarIcon class="w-4 h-4 mr-2" />
+              <SelectValue :placeholder="selectedYear" />
+            </div>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem 
+              v-for="year in years" 
+              :key="year" 
+              :value="year"
+              class="text-sm"
             >
-              <option value="">All Types</option>
-              <option value="travel">Travel</option>
-              <option value="non-travel">Non-Travel</option>
-            </select>
-          </div>
-          
-          <!-- Date From Filter -->
-          <div>
-            <Label>From Date</Label>
-            <Popover>
-              <PopoverTrigger as-child>
-                <Button variant="outline" class="w-full justify-start text-left font-normal">
-                  <CalendarIcon class="mr-2 h-4 w-4" />
-                  {{ filters.dateFrom ? format(filters.dateFrom, 'PPP') : 'Pick a date' }}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent class="w-auto p-0">
-                <Calendar v-model="filters.dateFrom" />
-              </PopoverContent>
-            </Popover>
-          </div>
-          
-          <!-- Date To Filter -->
-          <div>
-            <Label>To Date</Label>
-            <Popover>
-              <PopoverTrigger as-child>
-                <Button variant="outline" class="w-full justify-start text-left font-normal">
-                  <CalendarIcon class="mr-2 h-4 w-4" />
-                  {{ filters.dateTo ? format(filters.dateTo, 'PPP') : 'Pick a date' }}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent class="w-auto p-0">
-                <Calendar v-model="filters.dateTo" />
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-    
-    <!-- Expenses Grouped by Job Number -->
-    <Card>
-      <CardContent class="p-0">
-        <div v-if="loading" class="p-6 text-center">
-          Loading expenses...
-        </div>
-        <div v-else-if="error" class="p-6 text-center text-red-500">
-          {{ error }}
-        </div>
-        <div v-else-if="Object.keys(groupedRequests).length === 0" class="p-6 text-center">
-          No expenses found
-        </div>
-        <div v-else>
-          <!-- Job Number Groups -->
-          <div v-for="jobNumber in paginatedJobNumbers" :key="jobNumber" class="border-b last:border-b-0">
-            <!-- Job Header -->
-            <div 
-              class="flex justify-between items-center p-4 hover:bg-gray-50 cursor-pointer"
-              @click="toggleGroup(jobNumber)"
-            >
-              <div class="flex items-center">
-                <div class="mr-2">
-                  <ChevronDown v-if="!expandedGroups[jobNumber]" class="h-5 w-5" />
-                  <ChevronUp v-else class="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 class="font-medium">Job #{{ jobNumber }}</h3>
-                  <p class="text-sm text-gray-500">
-                    {{ groupedRequests[jobNumber].length }} expense{{ groupedRequests[jobNumber].length > 1 ? 's' : '' }} - 
-                    Total: {{ formatCurrency(getJobTotal(jobNumber)) }}
-                  </p>
-                </div>
-              </div>
-              <div>
-                <span class="text-sm text-gray-500">
-                  Latest: {{ formatDate(groupedRequests[jobNumber][0].created_at) }}
-                </span>
-              </div>
-            </div>
-            
-            <!-- Expenses Table for this Job -->
-            <div v-if="expandedGroups[jobNumber]" class="border-t">
-              <table class="w-full">
-                <thead>
-                  <tr class="bg-gray-50">
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="request in groupedRequests[jobNumber]" :key="request.id" class="border-t hover:bg-gray-50">
-                    <td class="px-4 py-3">{{ formatDate(request.created_at) }}</td>
-                    <td class="px-4 py-3">{{ request.description }}</td>
-                    <td class="px-4 py-3">
-                      {{ getExpenseCategory(request) }}
-                      <span v-if="request.is_travel && request.travel_distance" class="block text-xs text-gray-500">
-                        {{ request.travel_distance }} miles
-                      </span>
-                    </td>
-                    <td class="px-4 py-3">{{ formatCurrency(request.amount) }}</td>
-                    <td class="px-4 py-3">
-                      <span :class="['px-2 py-1 rounded-full text-xs font-medium', getStatusClass(request.status)]">
-                        {{ formatStatus(request.status) }}
-                      </span>
-                    </td>
-                    <td class="px-4 py-3">
-                      <Button 
-                        v-if="receiptSignedUrls[request.id] || request.receipt_url" 
-                        variant="outline" 
-                        size="sm"
-                        @click.stop="viewReceipt(request.receipt_url)"
-                        class="flex items-center"
-                      >
-                        <FileText class="h-4 w-4 mr-2" />
-                        View Receipt
-                      </Button>
-                      <span v-else class="text-gray-400">No receipt</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-          
-          <!-- Pagination -->
-          <div class="flex items-center justify-between px-4 py-3 border-t">
-            <div>
-              <p class="text-sm text-gray-700">
-                Showing page {{ currentPage }} of {{ totalPages || 1 }}
-                ({{ Object.keys(groupedRequests).length }} job{{ Object.keys(groupedRequests).length !== 1 ? 's' : '' }})
-              </p>
-            </div>
-            <div class="flex space-x-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                @click="prevPage" 
-                :disabled="currentPage === 1"
-              >
-                <ChevronLeft class="h-4 w-4" />
-                Previous
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                @click="nextPage" 
-                :disabled="currentPage === totalPages || totalPages === 0"
-              >
-                Next
-                <ChevronRight class="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  </div>
-  
-  <!-- Receipt Viewer Dialog -->
-  <Dialog v-model:open="viewingReceipt">
-    <DialogContent class="max-w-4xl">
-      <DialogHeader>
-        <DialogTitle>Receipt</DialogTitle>
-      </DialogHeader>
-      <div class="h-[70vh] overflow-auto">
-        <iframe 
-          v-if="currentReceiptUrl" 
-          :src="currentReceiptUrl" 
-          class="w-full h-full"
-        ></iframe>
+              {{ year }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
       </div>
-    </DialogContent>
-  </Dialog>
+
+      <div class="flex w-full grow relative px-1">
+        <div class="flex items-center w-full">
+          <button 
+            class="p-1 bg-black rounded-sm z-10 shrink-0"
+            @click="changeMonth((selectedMonth - 1 + 12) % 12)"
+          >
+            <ChevronLeft class="h-4 w-4 text-white" />
+          </button>
+          
+          <div class="flex overflow-x-auto relative w-full mx-1 scrollbar-hide">
+            <div class="absolute left-0 w-4 h-full bg-gradient-to-r from-background to-transparent pointer-events-none z-[1]"></div>
+            <div class="flex w-full justify-start lg:justify-center px-1 min-w-0">
+              <div class="flex space-x-1">
+                <button 
+                  v-for="(month, index) in months" 
+                  :key="index"
+                  :class="[
+                    'px-2 py-1 whitespace-nowrap text-sm shrink-0',
+                    selectedMonth === index ? 'bg-primary text-primary-foreground rounded-md' : 'hover:bg-secondary'
+                  ]"
+                  @click="changeMonth(index)"
+                >
+                  {{ month }}
+                </button>
+              </div>
+            </div>
+            <div class="absolute right-0 w-4 h-full bg-gradient-to-l from-background to-transparent pointer-events-none z-[1]"></div>
+          </div>
+
+          <button 
+            class="p-1 bg-black rounded-sm z-10 shrink-0"
+            @click="changeMonth((selectedMonth + 1) % 12)"
+          >
+            <ChevronRight class="h-4 w-4 text-white" />
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Border under months -->
+    <div class="h-px w-full bg-border"></div>
+
+    <!-- Expenses List -->
+    <div>
+      <div v-if="loading" class="space-y-4">
+        <div 
+          v-for="i in 3" 
+          :key="i" 
+          class="border rounded-lg overflow-hidden shadow-sm"
+        >
+          <!-- Category Header -->
+          <div class="bg-primary p-3 flex justify-between items-center">
+            <div class="flex items-center">
+              <Skeleton class="w-5 h-5 mr-3" />
+              <div>
+                <Skeleton class="h-5 w-32 mb-1" />
+                <Skeleton class="h-3 w-20" />
+              </div>
+            </div>
+            <div class="flex items-center space-x-4">
+              <Skeleton class="h-4 w-24" />
+              <Skeleton class="h-4 w-4" />
+            </div>
+          </div>
+
+          <!-- First Two Entries -->
+          <div 
+            v-for="j in 2" 
+            :key="j" 
+            class="border-t"
+          >
+            <div class="p-3 flex justify-between items-center bg-background">
+              <Skeleton class="h-4 w-24" />
+              <div class="flex items-center space-x-4">
+                <Skeleton class="h-4 w-20" />
+                <Skeleton class="h-4 w-4" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div v-else-if="error" class="bg-destructive/20 p-4 rounded-md text-destructive">
+        {{ error }}
+      </div>
+      
+      <div v-else-if="sortedCategoryKeys.length === 0" class="text-center py-8 text-muted-foreground">
+        No expenses found for this month.
+      </div>
+      
+      <div v-else>
+        <!-- Category Groups -->
+        <div v-for="categoryId in sortedCategoryKeys" :key="categoryId" class="border mb-4 rounded-lg overflow-hidden shadow-sm">
+          <!-- Category Header -->
+          <div 
+            class="bg-primary text-primary-foreground p-3 flex justify-between items-center cursor-pointer"
+            @click="toggleCategory(categoryId)"
+          >
+            <div class="flex items-center">
+              <img 
+                :src="`/icons/${organizedData[categoryId].name.toLowerCase().replace(/\s+/g, '-')}.svg`" 
+                :alt="organizedData[categoryId].name"
+                class="w-5 h-5 mr-3"
+                style="filter: invert(100%);"
+              />
+              <div>
+                <h3 class="font-medium text-base">{{ organizedData[categoryId].name }}</h3>
+                <p class="text-xs text-primary-foreground/70">
+                  {{ Object.keys(organizedData[categoryId].jobs).length }} job{{ Object.keys(organizedData[categoryId].jobs).length > 1 ? 's' : '' }}
+                </p>
+              </div>
+            </div>
+            <div class="flex items-center space-x-4">
+              <div class="text-sm text-primary-foreground/70">
+                Total: {{ formatCurrency(organizedData[categoryId].total) }}
+              </div>
+              <ChevronUp v-if="expandedCategories[categoryId]" class="h-4 w-4" />
+              <ChevronDown v-else class="h-4 w-4" />
+            </div>
+          </div>
+          
+          <!-- Job Groups -->
+          <Transition
+            enter-active-class="transition-all duration-300 ease-out"
+            enter-from-class="opacity-0 -translate-y-2"
+            enter-to-class="opacity-100 translate-y-0"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="opacity-100 translate-y-0"
+            leave-to-class="opacity-0 -translate-y-2"
+          >
+            <div v-if="expandedCategories[categoryId]">
+              <div 
+                v-for="jobNumber in getSortedJobKeys(categoryId)" 
+                :key="`${categoryId}-${jobNumber}`" 
+                class="border-t"
+              >
+                <!-- Job Header -->
+                <div 
+                  class="flex justify-between items-center p-3 bg-background cursor-pointer hover:bg-muted/50"
+                  @click="toggleJob(categoryId, jobNumber)"
+                >
+                  <div class="text-sm font-medium">
+                    Job #{{ jobNumber }}
+                  </div>
+                  <div class="flex items-center space-x-4">
+                    <div class="text-sm">
+                      {{ formatCurrency(organizedData[categoryId].jobs[jobNumber].total) }}
+                    </div>
+                    <ChevronUp v-if="expandedJobs[`${categoryId}-${jobNumber}`]" class="h-4 w-4 transition-transform duration-200" />
+                    <ChevronDown v-else class="h-4 w-4 transition-transform duration-200" />
+                  </div>
+                </div>
+                
+                <!-- Claims Table with animation -->
+                <Transition
+                  enter-active-class="transition-all duration-300 ease-out"
+                  enter-from-class="opacity-0 max-h-0 overflow-hidden"
+                  enter-to-class="opacity-100 max-h-[1000px]"
+                  leave-active-class="transition-all duration-200 ease-in"
+                  leave-from-class="opacity-100 max-h-[1000px]"
+                  leave-to-class="opacity-0 max-h-0 overflow-hidden"
+                >
+                  <div v-if="expandedJobs[`${categoryId}-${jobNumber}`]" class="border-t">
+                    <Table>
+                      <TableHeader>
+                        <TableRow class="bg-muted/50 hover:bg-muted/50">
+                          <TableHead class="uppercase text-xs font-medium text-muted-foreground">Date</TableHead>
+                          <TableHead class="uppercase text-xs font-medium text-muted-foreground">Description</TableHead>
+                          <TableHead class="uppercase text-xs font-medium text-muted-foreground">Amount</TableHead>
+                          <TableHead class="uppercase text-xs font-medium text-muted-foreground">Status</TableHead>
+                          <TableHead class="uppercase text-xs font-medium text-muted-foreground w-20">Receipt</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        <TableRow 
+                          v-for="claim in organizedData[categoryId].jobs[jobNumber].claims" 
+                          :key="claim.id"
+                          class="hover:bg-muted/50"
+                        >
+                          <TableCell class="py-2 text-sm">{{ formatDate(claim.date) }}</TableCell>
+                          <TableCell class="py-2">
+                            <div class="text-sm">{{ claim.description }}</div>
+                            <div v-if="claim.subcategory_mapping?.subcategory?.subcategory_name" 
+                                 class="text-xs text-muted-foreground mt-1">
+                              {{ claim.subcategory_mapping.subcategory.subcategory_name }}
+                            </div>
+                          </TableCell>
+                          <TableCell class="py-2">
+                            <div>{{ formatCurrency(claim.amount) }}</div>
+                            <div class="text-xs text-muted-foreground">
+                              <div>GST: {{ formatCurrency(claim.gst_amount) }}</div>
+                              <div>PST: {{ formatCurrency(claim.pst_amount) }}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell class="py-2">
+                            <span :class="[
+                              'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium gap-1', 
+                              getStatusClass(claim.status)
+                            ]">
+                              <Clock v-if="claim.status === 'pending'" class="h-3 w-3" />
+                              <CheckCircle v-if="['approved', 'verified', 'processed'].includes(claim.status)" class="h-3 w-3" />
+                              <XCircle v-if="claim.status === 'rejected'" class="h-3 w-3" />
+                              {{ formatStatus(claim.status) }}
+                            </span>
+                          </TableCell>
+                          <TableCell class="py-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              @click="viewReceipt(claim.receipt_url)"
+                              :disabled="!claim.receipt_url"
+                              class="h-7 w-7 p-0 rounded-full"
+                            >
+                              <FileText class="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                </Transition>
+              </div>
+            </div>
+          </Transition>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Receipt Viewer Dialog -->
+    <Dialog v-model:open="viewingReceipt">
+      <DialogContent class="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Receipt</DialogTitle>
+        </DialogHeader>
+        <div class="h-[70vh] overflow-auto">
+          <iframe 
+            v-if="currentReceiptUrl" 
+            :src="currentReceiptUrl" 
+            class="w-full h-full"
+          ></iframe>
+        </div>
+      </DialogContent>
+    </Dialog>
+  </div>
 </template>
+
+<style>
+.white-checkbox {
+  @apply appearance-none h-4 w-4 rounded border border-gray-300 bg-white;
+  @apply checked:bg-white checked:border-primary relative cursor-pointer;
+}
+
+.white-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='black'%3E%3Cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.transition-all {
+  transition-property: all;
+}
+
+.duration-200 {
+  transition-duration: 200ms;
+}
+
+.duration-300 {
+  transition-duration: 300ms;
+}
+
+.ease-in {
+  transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+}
+
+.ease-out {
+  transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+.rotate-180 {
+  transform: rotate(180deg);
+}
+</style> 

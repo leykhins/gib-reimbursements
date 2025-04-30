@@ -30,7 +30,6 @@ const managerNavItems = [
   { name: 'Dashboard', icon: Home, path: '/m/' },
   { name: 'Pending Approvals', icon: Clock, path: '/m/pending' },
   { name: 'Expenses', icon: Banknote, path: '/m/expenses' },
-  { name: 'Settings', icon: Settings, path: '/m/settings' },
 ]
 
 const toggleSidebar = () => {
