@@ -258,6 +258,25 @@ const fetchRecentRequests = async (department) => {
   if (error) throw error
   return data
 }
+
+
+// Status badge class
+const getStatusClass = (status) => {
+  switch (status) {
+    case 'approved':
+      return 'bg-green-100 text-green-800'
+    case 'completed':
+      return 'bg-purple-100 text-purple-800'
+    case 'verified':
+      return 'bg-blue-100 text-blue-800'
+    case 'pending':
+      return 'bg-yellow-100 text-yellow-800'
+    case 'rejected':
+      return 'bg-red-100 text-red-800'
+    default:
+      return 'bg-gray-100 text-gray-800'
+  }
+}
 </script>
 
 <template>
@@ -463,17 +482,18 @@ const fetchRecentRequests = async (department) => {
                     </div>
                   </TableCell>
                   <TableCell class="text-xs py-3">{{ formatDate(request.date) }}</TableCell>
-                  <TableCell class="py-3">
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
-                         :class="{
-                           'bg-yellow-100 text-yellow-800': getStatusVariant(request.status) === 'warning',
-                           'bg-blue-100 text-blue-800': getStatusVariant(request.status) === 'info',
-                           'bg-green-100 text-green-800': getStatusVariant(request.status) === 'success',
-                           'bg-red-100 text-red-800': getStatusVariant(request.status) === 'destructive',
-                           'bg-gray-100 text-gray-800': getStatusVariant(request.status) === 'default'
-                         }">
-                      <component :is="getStatusIconComponent(request.status)" class="h-3 w-3 mr-1" />
-                      {{ formatStatus(request.status) }}
+                  <TableCell class="py-2">
+                    <span :class="[
+                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs gap-1', 
+                    getStatusClass(request.status)
+                    ]">
+                        <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
+                        <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
+                        <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
+                        <span class="font-medium">
+                            {{ formatStatus(request.status) }}
+                            <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">- {{ request.rejection_reason }}</span>
+                        </span>
                     </span>
                   </TableCell>
                   <TableCell class="py-3">

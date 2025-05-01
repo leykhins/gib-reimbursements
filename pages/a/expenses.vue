@@ -77,6 +77,9 @@ const showVerifyModal = ref(false)
 const verifyingRequests = ref<string[]>([])
 const showSuccessModal = ref(false)
 const successMessage = ref('')
+const showRejectModal = ref(false)
+const rejectingRequestId = ref(null)
+const rejectionReason = ref('')
 
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
@@ -516,6 +519,49 @@ const toggleJob = (employeeId, categoryKey, jobNumber) => {
   expandedJobs.value[key] = !expandedJobs.value[key]
 }
 
+// Add this function to handle opening the reject modal
+const rejectRequest = async (requestId) => {
+  rejectingRequestId.value = requestId
+  rejectionReason.value = ''
+  showRejectModal.value = true
+}
+
+// Add this function to handle the actual rejection
+const confirmRejection = async () => {
+  try {
+    const { error } = await client
+      .from('claims')
+      .update({
+        status: 'rejected',
+        admin_verified_by: user.value.id,
+        admin_verified_at: new Date().toISOString(),
+        rejection_reason: rejectionReason.value
+      })
+      .eq('id', rejectingRequestId.value)
+    
+    if (error) throw error
+    
+    // Show success message
+    toast({
+      title: 'Success',
+      description: 'Request has been rejected',
+      variant: 'default'
+    })
+    
+    showRejectModal.value = false
+    
+    // Refresh the list
+    await fetchReimbursementRequests()
+  } catch (err) {
+    console.error('Error rejecting request:', err)
+    toast({
+      title: 'Error',
+      description: 'Failed to reject request',
+      variant: 'destructive'
+    })
+  }
+}
+
 // Initialize
 onMounted(async () => {
   await fetchAvailableYears()
@@ -844,16 +890,17 @@ onMounted(async () => {
                                   </div>
                                 </TableCell>
                                 <TableCell class="py-2">
-                                  <span 
-                                    class="max-w-min px-2 py-1 rounded-full text-xs flex items-center gap-1" 
-                                    :class="getStatusClass(request.status)"
-                                  >
-                                    <CheckCircle2 v-if="request.status === 'verified' || request.status === 'completed'" class="h-3 w-3" />
-                                    <Clock v-else-if="request.status === 'pending'" class="h-3 w-3" />
-                                    <XCircle v-else-if="request.status === 'rejected'" class="h-3 w-3" />
-                                    <CheckCircle v-else-if="request.status === 'manager_approved'" class="h-3 w-3" />
-                                    <CheckCircle2 v-else-if="request.status === 'admin_verified'" class="h-3 w-3" />
-                                    {{ formatStatus(request.status) }}
+                                  <span :class="[
+                                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs gap-1', 
+                                    getStatusClass(request.status)
+                                  ]">
+                                    <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
+                                    <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
+                                    <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
+                                    <span class="font-medium">
+                                      {{ formatStatus(request.status) }}
+                                      <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">- {{ request.rejection_reason }}</span>
+                                    </span>
                                   </span>
                                 </TableCell>
                                 <TableCell class="py-2">
@@ -961,6 +1008,32 @@ onMounted(async () => {
       </div>
       <div class="flex justify-end mt-4">
         <Button @click="viewingReceipt = false">Close</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+
+  <!-- Reject Request Modal -->
+  <Dialog v-model:open="showRejectModal">
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Reject Request</DialogTitle>
+        <DialogDescription>
+          Please provide a reason for rejecting this request.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="mt-4">
+        <Label for="rejection-reason">Rejection Reason</Label>
+        <Input id="rejection-reason" v-model="rejectionReason" />
+      </div>
+      <div class="flex justify-end space-x-2 mt-4">
+        <Button variant="outline" @click="showRejectModal = false">Cancel</Button>
+        <Button 
+          class="bg-red-600 hover:bg-red-700 text-white"
+          @click="confirmRejection"
+          :disabled="!rejectionReason.trim()"
+        >
+          Reject
+        </Button>
       </div>
     </DialogContent>
   </Dialog>
