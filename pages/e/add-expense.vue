@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
-import { CalendarIcon, Plus, Trash2, Upload, ArrowLeft, Check, X } from 'lucide-vue-next'
+import { CalendarIcon, Plus, Trash2, Upload, ArrowLeft, Check, X, LoaderCircle } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { format, formatISO, parse } from 'date-fns'
 import { GoogleApis } from 'vue'
@@ -14,6 +14,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  DateFormatter,
+  type DateValue,
+  getLocalTimeZone,
+} from '@internationalized/date'
 
 // Add showConfirmModal ref
 const showConfirmModal = ref(false)
@@ -196,7 +201,7 @@ const getSubcategoryRequirements = (subcategoryId: string) => {
   }
 }
 
-// Update the showField computed property
+// Updated showField function - modify GST and PST cases
 const showField = computed(() => (expenseId: number, fieldName: string) => {
   const expense = expenses.value.find(e => e.id === expenseId)
   if (!expense || !expense.categoryId) return false
@@ -232,14 +237,9 @@ const showField = computed(() => (expenseId: number, fieldName: string) => {
     case 'isCompanyEvent':
       return subcategoryName.includes('company event')
     case 'gst':
-      // Show GST for all categories except Car Mileage
-      return !categoryName.includes('mileage')
+      return true // Show GST for all categories
     case 'pst':
-      // Show PST only for Office Expenses, Sales/Marketing, and Safety
-      return categoryName.includes('office') || 
-             categoryName.includes('sales') || 
-             categoryName.includes('marketing') ||
-             categoryName.includes('safety')
+      return true // Show PST for all categories
     default:
       return false
   }
@@ -435,23 +435,6 @@ const deleteFile = async (expenseId: number): Promise<void> => {
   }
 }
 
-// Update the formattedDates computed property
-const formattedDates = computed({
-  get: () => {
-    return expenses.value.reduce((acc, expense) => {
-      acc[expense.id] = formatDateForInput(expense.date)
-      return acc
-    }, {} as Record<number, string>)
-  },
-  set: (newValue: Record<number, string>) => {
-    Object.entries(newValue).forEach(([id, dateString]) => {
-      const expenseIndex = expenses.value.findIndex(e => e.id === Number(id))
-      if (expenseIndex !== -1) {
-        handleDateChange(Number(id), dateString)
-      }
-    })
-  }
-})
 
 // Updated confirmSubmit function to pass the date directly
 const confirmSubmit = async () => {
@@ -478,7 +461,7 @@ const confirmSubmit = async () => {
         amount: parseFloat(expense.amount),
         gst_amount: parseFloat(expense.gst_amount || '0'),
         pst_amount: parseFloat(expense.pst_amount || '0'),
-        date: expense.date,
+        date: inputDate.value ? inputDate.value.toDate(getLocalTimeZone()) : new Date(),
         is_travel: isTravel,
         travel_distance: isTravel && expense.distance ? parseFloat(expense.distance) : null,
         travel_type: isTravel ? (categoryName.includes('mileage') ? 'car' : 'public_transport') : null,
@@ -598,6 +581,12 @@ const setupAutocomplete = () => {
     const endInput = document.getElementById('destination')
     
     try {
+      // Only proceed if both inputs exist
+      if (!startInput || !endInput) {
+        console.log('Autocomplete inputs not found in DOM yet')
+        return
+      }
+      
       // Only recreate the autocomplete if it hasn't been initialized already for this input
       if (!startInput.getAttribute('data-autocomplete-initialized')) {
         const options = {
@@ -753,28 +742,44 @@ const totalPST = computed(() => {
   }, 0).toFixed(2)
 })
 
-// Calculate grand total (amount + GST + PST)
-const grandTotal = computed(() => {
-  return (parseFloat(totalAmount.value) + 
-          parseFloat(totalGST.value) + 
-          parseFloat(totalPST.value)).toFixed(2)
-})
-
-// Simplified date handling functions
-const formatDateForInput = (date: Date): string => {
-  return format(date, 'yyyy-MM-dd')
+// Add function to calculate GST for parking expenses
+const calculateParkingGST = (amount: string): string => {
+  if (!amount || isNaN(parseFloat(amount))) return '0.00'
+  return ((parseFloat(amount) / 1.29) * 0.05).toFixed(2)
 }
 
-// Update the handleDateChange function to ensure dates are properly parsed
-const handleDateChange = (expenseId: number, dateString: string) => {
+// Update the handleCategoryChange function to calculate GST for parking
+const handleCategoryChange = (expenseId: number) => {
   const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-  if (expenseIndex !== -1 && dateString) {
-    // Create a date object from the input value YYYY-MM-DD
-    const [year, month, day] = dateString.split('-').map(Number)
-    const date = new Date(year, month - 1, day)
-    expenses.value[expenseIndex].date = date
+  if (expenseIndex === -1) return
+  
+  const expense = expenses.value[expenseIndex]
+  const category = dbCategories.value.find(c => c.id === expense.categoryId)
+  
+  if (category) {
+    const categoryName = category.name.toLowerCase()
+    
+    // If it's a parking category, calculate GST based on the provided formula
+    if (categoryName.includes('parking') && expense.amount) {
+      expenses.value[expenseIndex].gst_amount = calculateParkingGST(expense.amount)
+    }
   }
 }
+
+// Update the grand total calculation to only use the total amounts
+const grandTotal = computed(() => {
+  return expenses.value.reduce((sum, expense) => {
+    const amount = parseFloat(expense.amount) || 0
+    return sum + amount
+  }, 0).toFixed(2)
+})
+
+const df = new DateFormatter('en-US', {
+  dateStyle: 'long',
+})
+
+const inputDate = ref<DateValue>()
+
 </script>
 
 <template>
@@ -865,50 +870,87 @@ const handleDateChange = (expenseId: number, dateString: string) => {
           
           <CardContent>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <!-- Category selection from database -->
+              <!-- Category and Subcategory on the same line -->
               <div class="space-y-2 md:col-span-2">
-                <Label for="category" class="flex items-center">
-                  Expense Category <span class="text-red-500 ml-1">*</span>
-                </Label>
-                <Select v-model="expense.categoryId" required>
-                  <SelectTrigger class="w-full">
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="category in dbCategories" :key="category.id" :value="category.id">
-                      {{ category.name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <!-- Category selection from database -->
+                  <div class="space-y-2">
+                    <Label for="category" class="flex items-center">
+                      Expense Category <span class="text-red-500 ml-1">*</span>
+                    </Label>
+                    <Select v-model="expense.categoryId" required>
+                      <SelectTrigger class="w-full">
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem v-for="category in dbCategories" :key="category.id" :value="category.id">
+                          {{ category.name }}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <!-- Subcategory selection - always visible -->
+                  <div class="space-y-2">
+                    <Label for="subcategory" class="flex items-center">
+                      Subcategory <span class="text-red-500 ml-1">*</span>
+                    </Label>
+                    <Select 
+                      v-model="expense.subcategoryMappingId" 
+                      @update:modelValue="(value) => {
+                        expense.subcategoryMappingId = value;
+                        const subcategory = dbSubcategories.value && dbSubcategories.value.find(sc => sc.mapping_id === value);
+                        expense.subcategoryId = subcategory?.id || '';
+                      }"
+                      required
+                      :disabled="!expense.categoryId"
+                    >
+                      <SelectTrigger class="w-full">
+                        <SelectValue placeholder="Select subcategory" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem 
+                          v-for="subcategory in getSubcategories(expense.id)" 
+                          :key="subcategory.id" 
+                          :value="subcategory.mapping_id"
+                        >
+                          {{ subcategory.name }}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </div>
               
-              <!-- Subcategory selection from database -->
-              <div v-if="expense.categoryId" class="space-y-2 md:col-span-2">
-                <Label for="subcategory" class="flex items-center">
-                  Subcategory <span class="text-red-500 ml-1">*</span>
-                </Label>
-                <Select 
-                  v-model="expense.subcategoryMappingId" 
-                  @update:modelValue="(value) => {
-                    expense.subcategoryMappingId = value;
-                    const subcategory = dbSubcategories.value.find(sc => sc.mapping_id === value);
-                    expense.subcategoryId = subcategory?.id || '';
-                  }"
-                  required
-                >
-                  <SelectTrigger class="w-full">
-                    <SelectValue placeholder="Select subcategory" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem 
-                      v-for="subcategory in getSubcategories(expense.id)" 
-                      :key="subcategory.id" 
-                      :value="subcategory.mapping_id"
-                    >
-                      {{ subcategory.name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+              <!-- Client Name and Company Name on the same line -->
+              <div v-if="showField(expense.id, 'clientName') || showField(expense.id, 'companyName')" class="space-y-2 md:col-span-2">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <!-- Client Name -->
+                  <div v-if="showField(expense.id, 'clientName')" class="space-y-2">
+                    <Label for="clientName" class="flex items-center">
+                      Client Name <span class="text-red-500 ml-1">*</span>
+                    </Label>
+                    <Input 
+                      id="clientName" 
+                      v-model="expense.clientName" 
+                      placeholder="Enter client name" 
+                      required
+                    />
+                  </div>
+                  
+                  <!-- Company Name -->
+                  <div v-if="showField(expense.id, 'companyName')" class="space-y-2">
+                    <Label for="companyName" class="flex items-center">
+                      Company Name <span class="text-red-500 ml-1">*</span>
+                    </Label>
+                    <Input 
+                      id="companyName" 
+                      v-model="expense.companyName" 
+                      placeholder="Enter company name" 
+                      required
+                    />
+                  </div>
+                </div>
               </div>
               
               <!-- Date field -->
@@ -916,13 +958,27 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                 <Label for="date" class="flex items-center">
                   Date of Expense <span class="text-red-500 ml-1">*</span>
                 </Label>
-                <Input 
-                  id="date" 
-                  type="date" 
-                  v-model="expense.date"
-                  required
-                  class="w-full"
-                />
+                <Popover v-model:open="expense.datePopoverOpen">
+                  <PopoverTrigger as-child>
+                    <Button
+                      variant="outline"
+                      :class="cn(
+                        'w-full justify-start text-left font-normal',
+                        !inputDate && 'text-muted-foreground',
+                      )"
+                    >
+                      <CalendarIcon class="mr-2 h-4 w-4" />
+                      {{ inputDate ? df.format(inputDate.toDate(getLocalTimeZone())) : "Pick a date" }}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent class="w-auto p-0">
+                    <Calendar 
+                      v-model="inputDate" 
+                      initial-focus 
+                      @update:model-value="() => expense.datePopoverOpen = false"
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
               
               <!-- Job Number -->
@@ -964,90 +1020,108 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                 />
               </div>
               
-              <!-- Client Name and Company Name - for Business Development -->
-              <div v-if="showField(expense.id, 'clientName')" class="space-y-2">
-                <Label for="clientName" class="flex items-center">
-                  Client Name <span class="text-red-500 ml-1">*</span>
-                </Label>
-                <Input 
-                  id="clientName" 
-                  v-model="expense.clientName" 
-                  placeholder="Enter client name" 
-                  required
-                />
+              <!-- Amount, GST, and PST fields in one row -->
+              <div v-if="expense.categoryId && !dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <!-- Amount -->
+                  <div class="space-y-2">
+                    <Label for="amount" class="flex items-center">
+                      Total Amount (Including Tax) <span class="text-red-500 ml-1">*</span>
+                    </Label>
+                    <Input 
+                      id="amount" 
+                      type="number" 
+                      step="0.01" 
+                      v-model="expense.amount" 
+                      placeholder="0.00" 
+                      @input="handleCategoryChange(expense.id)"
+                      required
+                    />
+                  </div>
+
+                  <!-- GST Amount -->
+                  <div v-if="showField(expense.id, 'gst')" class="space-y-2">
+                    <Label for="gst_amount" class="flex items-center">
+                      GST Amount ($)
+                    </Label>
+                    <Input 
+                      id="gst_amount" 
+                      type="number" 
+                      step="0.01" 
+                      v-model="expense.gst_amount" 
+                      placeholder="0.00"
+                    />
+                  </div>
+
+                  <!-- PST Amount -->
+                  <div v-if="showField(expense.id, 'pst')" class="space-y-2">
+                    <Label for="pst_amount" class="flex items-center">
+                      PST Amount ($)
+                    </Label>
+                    <Input 
+                      id="pst_amount" 
+                      type="number" 
+                      step="0.01" 
+                      v-model="expense.pst_amount" 
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
               </div>
-              
-              <div v-if="showField(expense.id, 'companyName')" class="space-y-2">
-                <Label for="companyName" class="flex items-center">
-                  Company Name <span class="text-red-500 ml-1">*</span>
-                </Label>
-                <Input 
-                  id="companyName" 
-                  v-model="expense.companyName" 
-                  placeholder="Enter company name" 
-                  required
-                />
-              </div>
-              
-              <!-- Car Mileage specific fields -->
+
+              <!-- Car Mileage specific fields - responsive layout -->
               <div v-if="expense.categoryId && dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <!-- Start Location with Google Autocomplete -->
-                  <div class="space-y-2">
-                    <Label for="startLocation" class="flex items-center">
-                      Start Address <span class="text-red-500 ml-1">*</span>
-                    </Label>
-                    <Input 
-                      id="startLocation" 
-                      v-model="expense.startLocation" 
-                      placeholder="Enter Start Address" 
-                      autocomplete="off"
-                      required
-                    />
-                  </div>
-                  
-                  <!-- Destination with Google Autocomplete -->
-                  <div class="space-y-2">
-                    <Label for="destination" class="flex items-center">
-                      Destination Address <span class="text-red-500 ml-1">*</span>
-                    </Label>
-                    <Input 
-                      id="destination" 
-                      v-model="expense.destination" 
-                      placeholder="Enter Destination Address" 
-                      autocomplete="off"
-                      required
-                    />
-                  </div>
-                  
-                  <!-- Display the calculated distance info -->
-                  <div v-if="calculatedDistance" class="space-y-2 md:col-span-2">
-                    <div class="text-sm text-green-600 mt-1">
-                      Google Maps: {{ calculatedDistance }} km ({{ calculatedDuration }})
+                <div class="grid grid-cols-1 gap-4">
+                  <!-- Address fields in one row on larger screens -->
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Start Location with Google Autocomplete -->
+                    <div class="space-y-2">
+                      <Label for="startLocation" class="flex items-center">
+                        Start Address <span class="text-red-500 ml-1">*</span>
+                      </Label>
+                      <Input 
+                        id="startLocation" 
+                        v-model="expense.startLocation" 
+                        placeholder="Enter Start Address" 
+                        autocomplete="off"
+                        required
+                      />
+                    </div>
+                    
+                    <!-- Destination with Google Autocomplete -->
+                    <div class="space-y-2">
+                      <Label for="destination" class="flex items-center">
+                        Destination Address <span class="text-red-500 ml-1">*</span>
+                      </Label>
+                      <Input 
+                        id="destination" 
+                        v-model="expense.destination" 
+                        placeholder="Enter Destination Address" 
+                        autocomplete="off"
+                        required
+                      />
+                    </div>
+                    
+                    <!-- Total Distance -->
+                    <div class="space-y-2">
+                      <Label for="distance" class="flex items-center">
+                        Total Distance (km) <span class="text-red-500 ml-1">*</span>
+                      </Label>
+                      <Input 
+                        id="distance" 
+                        type="number" 
+                        v-model="expense.distance" 
+                        placeholder="0" 
+                        @input="updateMileageAmount(expense.id)"
+                        readonly
+                        required
+                      />
+                      <p v-if="calculatedDistance" class="text-xs text-green-600">Auto-calculated from addresses (from Google Maps)</p>
                     </div>
                   </div>
-                  
-                  <!-- Total Distance -->
-                  <div class="space-y-2">
-                    <Label for="distance" class="flex items-center">
-                      Total Distance (km) <span class="text-red-500 ml-1">*</span>
-                    </Label>
-                    <Input 
-                      id="distance" 
-                      type="number" 
-                      v-model="expense.distance" 
-                      placeholder="0" 
-                      @input="updateMileageAmount(expense.id)"
-                      readonly
-                      required
-                    />
-                    <p v-if="calculatedDistance" class="text-xs text-green-600">
-                      Auto-calculated from addresses above
-                    </p>
-                  </div>
-                  
+
                   <!-- Calculated Amount (read-only) -->
-                  <div class="space-y-2">
+                  <div class="space-y-2 md:w-1/3">
                     <Label for="calculated-amount" class="flex items-center">
                       Amount ($) <span class="text-red-500 ml-1">*</span>
                     </Label>
@@ -1061,66 +1135,6 @@ const handleDateChange = (expenseId: number, dateString: string) => {
                     <p class="text-xs text-gray-500">Based on $0.61/km</p>
                   </div>
                 </div>
-              </div>
-              
-              <!-- Amount - for all except car mileage -->
-              <div v-if="expense.categoryId && !dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2">
-                <Label for="amount" class="flex items-center">
-                  Amount ($) <span class="text-red-500 ml-1">*</span>
-                </Label>
-                <Input 
-                  id="amount" 
-                  type="number" 
-                  step="0.01" 
-                  v-model="expense.amount" 
-                  placeholder="0.00" 
-                  required
-                />
-              </div>
-
-              <!-- GST Amount - show based on category -->
-              <div v-if="showField(expense.id, 'gst')" class="space-y-2">
-                <Label for="gst_amount" class="flex items-center">
-                  GST Amount ($) <span class="text-red-500 ml-1">*</span>
-                </Label>
-                <Input 
-                  id="gst_amount" 
-                  type="number" 
-                  step="0.01" 
-                  v-model="expense.gst_amount" 
-                  placeholder="0.00"
-                  required
-                />
-              </div>
-
-              <!-- PST Amount - show based on category -->
-              <div v-if="showField(expense.id, 'pst')" class="space-y-2">
-                <Label for="pst_amount" class="flex items-center">
-                  PST Amount ($) <span class="text-red-500 ml-1">*</span>
-                </Label>
-                <Input 
-                  id="pst_amount" 
-                  type="number" 
-                  step="0.01" 
-                  v-model="expense.pst_amount" 
-                  placeholder="0.00"
-                  required
-                />
-              </div>
-              
-              <!-- Description - hide for Meals category -->
-              <div v-if="expense.categoryId && !dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('meal')" class="space-y-2" :class="{ 'md:col-span-2': true }">
-                <Label for="description" class="flex items-center">
-                  Description <span class="text-red-500 ml-1">*</span>
-                </Label>
-                <textarea 
-                  id="description" 
-                  v-model="expense.description" 
-                  placeholder="Describe the expense" 
-                  class="w-full px-3 py-2 border rounded-md" 
-                  rows="2"
-                  required
-                ></textarea>
               </div>
               
               <!-- Receipt Upload with immediate upload - conditionally shown -->
@@ -1229,7 +1243,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
             
             <!-- Submit Button -->
             <Button type="submit" class="px-6 flex items-center justify-center" :disabled="loading || categoriesLoading">
-              <SpinIcon v-if="loading" class="h-4 w-4 mr-2 animate-spin" />
+              <LoaderCircle v-if="loading" class="h-4 w-4 mr-2 animate-spin" />
               <span>{{ loading ? 'Submitting...' : 'Submit Expenses' }}</span>
             </Button>
           </div>
@@ -1248,7 +1262,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
             </div>
             <div class="flex items-center justify-between">
               <Button type="submit" class="w-full px-6 flex items-center justify-center" :disabled="loading || categoriesLoading">
-                <SpinIcon v-if="loading" class="h-4 w-4 mr-2 animate-spin" />
+                <LoaderCircle v-if="loading" class="h-4 w-4 mr-2 animate-spin" />
                 <span>{{ loading ? 'Submitting...' : 'Submit Expenses' }}</span>
               </Button>
             </div>
@@ -1268,7 +1282,7 @@ const handleDateChange = (expenseId: number, dateString: string) => {
         <div class="flex justify-end space-x-2">
           <Button variant="outline" @click="cancelSubmit">Cancel</Button>
           <Button @click="confirmSubmit" :disabled="loading">
-            <SpinIcon v-if="loading" class="h-4 w-4 mr-2 animate-spin" />
+            <LoaderCircle v-if="loading" class="h-4 w-4 mr-2 animate-spin" />
             <span>{{ loading ? 'Submitting...' : 'Confirm' }}</span>
           </Button>
         </div>
