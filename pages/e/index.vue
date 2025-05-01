@@ -35,6 +35,10 @@ const receiptSignedUrls = ref({})
 const viewingReceipt = ref(false)
 const currentReceiptUrl = ref('')
 
+// Add this ref for viewing rejection details
+const viewingRejection = ref(false)
+const currentRejection = ref(null)
+
 // Function to get correct URL for receipt
 const getReceiptUrl = async (url, requestId) => {
   if (!url) return null
@@ -88,6 +92,14 @@ const prepareReceiptUrls = async () => {
   }
 }
 
+// Add this function to view rejection details
+const viewRejectionDetails = (request) => {
+  if (request.status === 'rejected') {
+    currentRejection.value = request
+    viewingRejection.value = true
+  }
+}
+
 // Fetch categories and reimbursement requests
 const fetchReimbursementRequests = async () => {
   try {
@@ -116,6 +128,7 @@ const fetchReimbursementRequests = async () => {
         destination,
         receipt_url,
         status,
+        rejection_reason,
         date,
         created_at,
         employee_id,
@@ -350,6 +363,7 @@ const formatCategory = (categoryId) => {
                     </div>
                   </TableCell>
                   <TableCell class="text-xs py-3">{{ formatDate(request.date) }}</TableCell>
+                  
                   <TableCell class="py-3">
                     <span 
                       :class="{
@@ -357,12 +371,15 @@ const formatCategory = (categoryId) => {
                         'bg-green-100 text-green-800': ['approved', 'verified', 'processed'].includes(request.status),
                         'bg-red-100 text-red-800': request.status === 'rejected'
                       }"
-                      class="px-2 py-0.5 rounded-full text-xs font-medium inline-flex items-center gap-1"
+                      class="px-2 py-0.5 rounded-full text-xs inline-flex items-center gap-1"
                     >
                       <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
                       <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
                       <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
-                      {{ formatStatus(request.status) }}
+                      <span class="font-medium">
+                        {{ formatStatus(request.status) }}
+                        <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">: {{ request.rejection_reason }}</span>
+                      </span>
                     </span>
                   </TableCell>
                   <TableCell class="py-3">
@@ -404,6 +421,30 @@ const formatCategory = (categoryId) => {
             :src="currentReceiptUrl" 
             class="w-full h-full"
           ></iframe>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Rejection Details Dialog -->
+    <Dialog v-model:open="viewingRejection">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle class="text-sm">Claim Rejection</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-3">
+          <div v-if="currentRejection">
+            <div class="text-muted-foreground text-xs mb-2">
+              {{ formatDate(currentRejection.date) }}
+            </div>
+            <div class="font-medium mb-1">{{ currentRejection.description }}</div>
+            <div class="text-sm mb-2">
+              {{ formatCurrency(currentRejection.amount) }}
+            </div>
+            <div class="text-sm font-medium mt-4">Rejection Reason:</div>
+            <div class="p-3 bg-red-50 border border-red-100 rounded-md mt-1">
+              {{ currentRejection.rejection_reason || 'No reason provided' }}
+            </div>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

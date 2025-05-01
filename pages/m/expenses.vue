@@ -947,17 +947,18 @@ onMounted(async () => {
                                   </div>
                                 </TableCell>
                                 <TableCell class="py-2">
-                                  <span 
-                                    class="max-w-min px-2 py-1 rounded-full text-xs flex items-center gap-1" 
-                                    :class="getStatusClass(request.status)"
-                                  >
-                                    <CheckCircle2 v-if="request.status === 'verified' || request.status === 'completed'" class="h-3 w-3" />
-                                    <Clock v-else-if="request.status === 'pending'" class="h-3 w-3" />
-                                    <XCircle v-else-if="request.status === 'rejected'" class="h-3 w-3" />
-                                    <CheckCircle v-else-if="request.status === 'manager_approved' || request.status === 'approved'" class="h-3 w-3" />
-                                    <CheckCircle2 v-else-if="request.status === 'admin_verified'" class="h-3 w-3" />
-                                    {{ formatStatus(request.status) }}
-                                  </span>
+                                    <span :class="[
+                                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs gap-1', 
+                                    getStatusClass(request.status)
+                                    ]">
+                                        <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
+                                        <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
+                                        <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
+                                        <span class="font-medium">
+                                            {{ formatStatus(request.status) }}
+                                            <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">- {{ request.rejection_reason }}</span>
+                                        </span>
+                                    </span>
                                 </TableCell>
                                 <TableCell class="py-2">
                                   <div class="flex space-x-2">

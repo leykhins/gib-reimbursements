@@ -860,21 +860,24 @@ onMounted(async () => {
                                 </div>
                               </TableCell>
                               <TableCell class="py-2">
-                                    <div>{{ formatCurrency(request.amount) }}</div>
-                                    <div class="text-xs text-muted-foreground">
-                                    <div>GST: {{ formatCurrency(request.gst_amount) }}</div>
-                                    <div>PST: {{ formatCurrency(request.pst_amount) }}</div>
-                                    </div>
-                                </TableCell>
+                                <div>{{ formatCurrency(request.amount) }}</div>
+                                <div class="text-xs text-muted-foreground">
+                                <div>GST: {{ formatCurrency(request.gst_amount) }}</div>
+                                <div>PST: {{ formatCurrency(request.pst_amount) }}</div>
+                                </div>
+                              </TableCell>
                               <TableCell class="py-2">
                                 <span :class="[
-                                  'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium gap-1', 
-                                  getStatusClass(request.status)
+                                'inline-flex items-center px-2 py-0.5 rounded-full text-xs gap-1', 
+                                getStatusClass(request.status)
                                 ]">
-                                  <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
-                                  <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
-                                  <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
-                                  {{ formatStatus(request.status) }}
+                                    <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
+                                    <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
+                                    <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
+                                    <span class="font-medium">
+                                        {{ formatStatus(request.status) }}
+                                        <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">- {{ request.rejection_reason }}</span>
+                                    </span>
                                 </span>
                               </TableCell>
                               <TableCell class="py-2">

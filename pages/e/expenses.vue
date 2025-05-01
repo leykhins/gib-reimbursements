@@ -257,11 +257,11 @@ const viewReceipt = async (receiptUrl) => {
 // Status badge class
 const getStatusClass = (status) => {
   switch (status) {
-    case 'manager_approved':
+    case 'approved':
       return 'bg-green-100 text-green-800'
     case 'completed':
       return 'bg-purple-100 text-purple-800'
-    case 'admin_verified':
+    case 'verified':
       return 'bg-blue-100 text-blue-800'
     case 'pending':
       return 'bg-yellow-100 text-yellow-800'
@@ -642,13 +642,16 @@ onMounted(async () => {
                           </TableCell>
                           <TableCell class="py-2">
                             <span :class="[
-                              'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium gap-1', 
+                              'inline-flex items-center px-2 py-0.5 rounded-full text-xs gap-1', 
                               getStatusClass(claim.status)
                             ]">
                               <Clock v-if="claim.status === 'pending'" class="h-3 w-3" />
                               <CheckCircle v-if="['approved', 'verified', 'processed'].includes(claim.status)" class="h-3 w-3" />
                               <XCircle v-if="claim.status === 'rejected'" class="h-3 w-3" />
-                              {{ formatStatus(claim.status) }}
+                              <span class="font-medium">
+                                {{ formatStatus(claim.status) }}
+                                <span v-if="claim.status === 'rejected' && claim.rejection_reason" class="font-normal">: {{ claim.rejection_reason }}</span>
+                              </span>
                             </span>
                           </TableCell>
                           <TableCell class="py-2">
@@ -657,7 +660,7 @@ onMounted(async () => {
                               size="sm"
                               @click="viewReceipt(claim.receipt_url)"
                               :disabled="!claim.receipt_url"
-                              class="h-7 w-7 p-0 rounded-full"
+                              class="h-7 w-7 p-0 rounded-md"
                             >
                               <FileText class="h-4 w-4" />
                             </Button>
