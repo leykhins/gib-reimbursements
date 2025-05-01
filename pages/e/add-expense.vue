@@ -554,91 +554,91 @@ const initGoogleMaps = () => {
 const setupAutocomplete = () => {
   // Use nextTick to ensure DOM is updated before accessing elements
   nextTick(() => {
-    // Find all the input elements for car expenses
-    const startInput = document.getElementById('startLocation')
-    const endInput = document.getElementById('destination')
-    
     try {
-      // Only proceed if both inputs exist
-      if (!startInput || !endInput) {
-        console.log('Autocomplete inputs not found in DOM yet')
-        return
-      }
+      // Find all car mileage expenses
+      const mileageExpenses = expenses.value.filter(e => {
+        const category = dbCategories.value.find(c => c.id === e.categoryId)
+        return category && category.name.toLowerCase().includes('mileage')
+      })
       
-      // Only recreate the autocomplete if it hasn't been initialized already for this input
-      if (!startInput.getAttribute('data-autocomplete-initialized')) {
-        const options = {
-          types: ['address'],
-          componentRestrictions: { country: 'ca' }
+      // Initialize autocomplete for each mileage expense
+      mileageExpenses.forEach(expense => {
+        const startInput = document.getElementById(`startLocation-${expense.id}`)
+        const endInput = document.getElementById(`destination-${expense.id}`)
+        
+        // Only proceed if both inputs exist for this expense
+        if (!startInput || !endInput) {
+          return
         }
         
-        autocompleteStart = new window.google.maps.places.Autocomplete(startInput, options)
-        startInput.setAttribute('data-autocomplete-initialized', 'true')
-        
-        // Use the place_changed event to update the model
-        autocompleteStart.addListener('place_changed', () => {
-          const place = autocompleteStart.getPlace()
-          if (place && place.formatted_address) {
-            // Find current car expense
-            const expenseIndex = expenses.value.findIndex(e => {
-              const category = dbCategories.value.find(c => c.id === e.categoryId)
-              return category && category.name.toLowerCase().includes('mileage')
-            })
-            
-            if (expenseIndex !== -1) {
-              // Update the startLocation value
-              expenses.value[expenseIndex].startLocation = place.formatted_address
-            }
-            calculateDistance()
+        // Initialize start location autocomplete
+        if (!startInput.getAttribute('data-autocomplete-initialized')) {
+          const options = {
+            types: ['address'],
+            componentRestrictions: { country: 'ca' }
           }
-        })
-      }
-      
-      if (!endInput.getAttribute('data-autocomplete-initialized')) {
-        const options = {
-          types: ['address'],
-          componentRestrictions: { country: 'ca' }
+          
+          const autoStart = new window.google.maps.places.Autocomplete(startInput, options)
+          startInput.setAttribute('data-autocomplete-initialized', 'true')
+          
+          autoStart.addListener('place_changed', () => {
+            const place = autoStart.getPlace()
+            if (place && place.formatted_address) {
+              // Update this specific expense's startLocation
+              const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
+              if (expenseIndex !== -1) {
+                expenses.value[expenseIndex].startLocation = place.formatted_address
+              }
+              calculateDistanceForExpense(expense.id)
+            }
+          })
         }
         
-        autocompleteEnd = new window.google.maps.places.Autocomplete(endInput, options)
-        endInput.setAttribute('data-autocomplete-initialized', 'true')
-        
-        autocompleteEnd.addListener('place_changed', () => {
-          const place = autocompleteEnd.getPlace()
-          if (place && place.formatted_address) {
-            // Find current car expense
-            const expenseIndex = expenses.value.findIndex(e => {
-              const category = dbCategories.value.find(c => c.id === e.categoryId)
-              return category && category.name.toLowerCase().includes('mileage')
-            })
-            
-            if (expenseIndex !== -1) {
-              // Update the destination value
-              expenses.value[expenseIndex].destination = place.formatted_address
-            }
-            calculateDistance()
+        // Initialize destination autocomplete
+        if (!endInput.getAttribute('data-autocomplete-initialized')) {
+          const options = {
+            types: ['address'],
+            componentRestrictions: { country: 'ca' }
           }
-        })
-      }
+          
+          const autoEnd = new window.google.maps.places.Autocomplete(endInput, options)
+          endInput.setAttribute('data-autocomplete-initialized', 'true')
+          
+          autoEnd.addListener('place_changed', () => {
+            const place = autoEnd.getPlace()
+            if (place && place.formatted_address) {
+              // Update this specific expense's destination
+              const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
+              if (expenseIndex !== -1) {
+                expenses.value[expenseIndex].destination = place.formatted_address
+              }
+              calculateDistanceForExpense(expense.id)
+            }
+          })
+        }
+      })
     } catch (error) {
       console.error("Error setting up autocomplete:", error)
     }
   })
 }
 
-// Modified calculate distance function to check if we have addresses
-const calculateDistance = () => {
-  if (!autocompleteStart || !autocompleteEnd) return
+// New function to calculate distance for a specific expense
+const calculateDistanceForExpense = (expenseId) => {
+  const startInput = document.getElementById(`startLocation-${expenseId}`)
+  const endInput = document.getElementById(`destination-${expenseId}`)
   
-  const startPlace = autocompleteStart.getPlace()
-  const endPlace = autocompleteEnd.getPlace()
+  if (!startInput || !endInput || !distanceMatrixService) return
   
-  // Only calculate if both places have been selected
-  if (startPlace?.formatted_address && endPlace?.formatted_address && 
-      startPlace.geometry && endPlace.geometry) {
+  // Get the expense
+  const expense = expenses.value.find(e => e.id === expenseId)
+  if (!expense) return
+  
+  // Only calculate if both addresses have values
+  if (expense.startLocation && expense.destination) {
     const request = {
-      origins: [startPlace.formatted_address],
-      destinations: [endPlace.formatted_address],
+      origins: [expense.startLocation],
+      destinations: [expense.destination],
       travelMode: 'DRIVING',
       unitSystem: window.google.maps.UnitSystem.METRIC
     }
@@ -650,18 +650,12 @@ const calculateDistance = () => {
           // Get distance in kilometers
           const distanceInMeters = results.distance.value
           const distanceInKm = distanceInMeters / 1000
-          calculatedDistance.value = distanceInKm.toFixed(2)
-          calculatedDuration.value = results.duration.text
           
-          // Update the distance field in the expense form
-          const expenseIndex = expenses.value.findIndex(e => {
-            const category = dbCategories.value.find(c => c.id === e.categoryId)
-            return category && category.name.toLowerCase().includes('mileage')
-          })
-          
+          // Update the distance field and amount for this specific expense
+          const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
           if (expenseIndex !== -1) {
-            expenses.value[expenseIndex].distance = calculatedDistance.value
-            updateMileageAmount(expenses.value[expenseIndex].id)
+            expenses.value[expenseIndex].distance = distanceInKm.toFixed(2)
+            updateMileageAmount(expenseId)
           }
         }
       }
@@ -1058,7 +1052,7 @@ const inputDate = ref<DateValue>()
                         Start Address <span class="text-red-500 ml-1">*</span>
                       </Label>
                       <Input 
-                        id="startLocation" 
+                        :id="`startLocation-${expense.id}`" 
                         v-model="expense.startLocation" 
                         placeholder="Enter Start Address" 
                         autocomplete="off"
@@ -1072,7 +1066,7 @@ const inputDate = ref<DateValue>()
                         Destination Address <span class="text-red-500 ml-1">*</span>
                       </Label>
                       <Input 
-                        id="destination" 
+                        :id="`destination-${expense.id}`" 
                         v-model="expense.destination" 
                         placeholder="Enter Destination Address" 
                         autocomplete="off"
@@ -1094,7 +1088,7 @@ const inputDate = ref<DateValue>()
                         readonly
                         required
                       />
-                      <p v-if="calculatedDistance" class="text-xs text-green-600">Auto-calculated from addresses (from Google Maps)</p>
+                      <p class="text-xs text-green-600">Auto-calculated from addresses (from Google Maps)</p>
                     </div>
                   </div>
 
