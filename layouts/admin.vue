@@ -9,7 +9,8 @@ import {
   Shield, 
   Home,
   X,
-  Banknote
+  Banknote,
+  Clock
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
@@ -25,9 +26,9 @@ const isSidebarOpen = ref(false)
 // Admin navigation items
 const adminNavItems = [
   { name: 'Dashboard', icon: Home, path: '/a/' },
+  { name: 'Pending', icon: Clock, path: '/a/pending' },
   { name: 'Expenses', icon: Banknote, path: '/a/expenses' },
   { name: 'Users', icon: Users, path: '/a/users' },
-  { name: 'Settings', icon: UserCog, path: '/a/settings' },
 ]
 
 const toggleSidebar = () => {

@@ -1,0 +1,212 @@
+---
+description: Mostupdated and Recent Database Structure and Schema Explanation
+globs: 
+alwaysApply: false
+---
+Database Structure and Schema Explanation
+-- Example 1: Create a new claim with appropriate validations
+-- Step 1: Find available category and subcategory mapping
+SELECT 
+  cc.id AS category_id, 
+  cc.category_name, 
+  cs.id AS subcategory_id, 
+  cs.subcategory_name,
+  csm.id AS mapping_id,
+  csm.requires_job_number,
+  csm.requires_employee_name,
+  csm.requires_client_info,
+  cc.requires_license_number
+FROM claim_categories cc
+JOIN category_subcategory_mapping csm ON cc.id = csm.category_id
+JOIN claim_subcategories cs ON csm.subcategory_id = cs.id
+WHERE cc.category_name = 'Tools and Equipment' 
+AND cs.subcategory_name = 'Jobsite';
+
+-- Step 2: Create a new claim using the mapping ID
+BEGIN;
+INSERT INTO claims (
+  employee_id, 
+  description, 
+  amount, 
+  gst_amount, 
+  pst_amount,
+  category_id, 
+  subcategory_mapping_id,
+  job_number, -- Required for this mapping
+  is_travel,
+  receipt_url,
+  status
+)
+VALUES (
+  '6f1e097e-57c2-4a1c-b9c6-146e94954dd6',  -- Example employee UUID
+  'Power drill purchased for job site',
+  149.99,
+  7.50,
+  12.00,
+  'ae31baca-e352-4bfb-9514-5c4b4b5f8e7a',  -- Category UUID from Step 1
+  'd582c238-79f5-4d1b-8c3e-b39b7d4e9a12',  -- Mapping UUID from Step 1
+  'JOB-2025-0429',  -- Job number required for this mapping
+  FALSE,
+  'https://storage.example.com/receipts/drill_receipt.pdf',
+  'pending'
+);
+COMMIT;
+
+-- Example 2: Generate a report of claims by category with tax amounts
+SELECT 
+  cc.category_name, 
+  cs.subcategory_name,
+  COUNT(*) AS claim_count,
+  SUM(c.amount) AS total_amount,
+  SUM(c.gst_amount) AS total_gst,
+  SUM(c.pst_amount) AS total_pst,
+  SUM(c.amount) + COALESCE(SUM(c.gst_amount), 0) + COALESCE(SUM(c.pst_amount), 0) AS grand_total
+FROM claims c
+JOIN claim_categories cc ON c.category_id = cc.id
+JOIN category_subcategory_mapping csm ON c.subcategory_mapping_id = csm.id
+JOIN claim_subcategories cs ON csm.subcategory_id = cs.id
+WHERE c.created_at >= '2025-01-01'
+GROUP BY cc.category_name, cs.subcategory_name
+ORDER BY total_amount DESC;
+
+-- Example 3: Find travel claims with all details
+SELECT 
+  c.id AS claim_id,
+  c.description,
+  c.amount,
+  c.gst_amount,
+  c.pst_amount,
+  c.travel_distance,
+  c.travel_type,
+  c.start_location,
+  c.destination,
+  CASE 
+    WHEN c.travel_type = 'car' AND c.travel_distance IS NOT NULL 
+    THEN c.travel_distance * 0.59 -- Example rate per km/mile
+    ELSE NULL
+  END AS calculated_amount,
+  cc.category_name,
+  cs.subcategory_name,
+  c.job_number,
+  c.status
+FROM claims c
+JOIN claim_categories cc ON c.category_id = cc.id
+JOIN category_subcategory_mapping csm ON c.subcategory_mapping_id = csm.id
+JOIN claim_subcategories cs ON csm.subcategory_id = cs.id
+WHERE c.is_travel = TRUE
+ORDER BY c.created_at DESC;
+
+-- Example 4: Update claim status through approval workflow
+BEGIN;
+-- Step 1: Admin verification
+UPDATE claims
+SET 
+  status = 'verified',
+  admin_verified_by = '3a7c4b8e-6d2f-4e5a-9c1b-8d7e6f5d4c3b',
+  admin_verified_at = NOW(),
+  updated_at = NOW()
+WHERE id = '1f2e3d4c-5b6a-7980-8f9e-0a1b2c3d4e5f'
+AND status = 'pending';
+
+-- Step 2: Manager approval
+UPDATE claims
+SET 
+  status = 'approved',
+  manager_approved_by = '9e8d7c6b-5a4f-3e2d-1c0b-9a8b7c6d5e4f',
+  manager_approved_at = NOW(),
+  updated_at = NOW()
+WHERE id = '1f2e3d4c-5b6a-7980-8f9e-0a1b2c3d4e5f'
+AND status = 'verified'
+AND admin_verified_at IS NOT NULL;
+
+-- Step 3: Accounting processing
+UPDATE claims
+SET 
+  status = 'processed',
+  accounting_processed_by = '5f4e3d2c-1b0a-9f8e-7d6c-5b4a3f2e1d0c',
+  accounting_processed_at = NOW(),
+  payment_method = 'direct_deposit',
+  payment_reference = 'PAY-2025-04-29-001',
+  updated_at = NOW()
+WHERE id = '1f2e3d4c-5b6a-7980-8f9e-0a1b2c3d4e5f'
+AND status = 'approved'
+AND manager_approved_at IS NOT NULL;
+COMMIT;
+
+-- Example 5: Add a new category and subcategory with mapping
+BEGIN;
+-- Step 1: Insert new category
+INSERT INTO claim_categories (category_name, requires_license_number)
+VALUES ('Professional Development', FALSE)
+RETURNING id INTO @new_category_id;
+
+-- Step 2: Insert new subcategory
+INSERT INTO claim_subcategories (subcategory_name)
+VALUES ('Conferences')
+RETURNING id INTO @new_subcategory_id;
+
+-- Step 3: Create mapping with requirements
+INSERT INTO category_subcategory_mapping (
+  category_id, 
+  subcategory_id, 
+  requires_job_number, 
+  requires_employee_name, 
+  requires_client_info
+)
+VALUES (
+  @new_category_id, 
+  @new_subcategory_id, 
+  FALSE, -- No job number required
+  FALSE, -- No employee name required
+  FALSE  -- No client info required
+);
+COMMIT;
+
+-- Example 6: Advanced search for claims with multiple filters
+SELECT 
+  c.id AS claim_id,
+  c.description,
+  c.amount,
+  c.gst_amount,
+  c.pst_amount,
+  c.created_at,
+  cc.category_name,
+  cs.subcategory_name,
+  c.status
+FROM claims c
+JOIN claim_categories cc ON c.category_id = cc.id
+JOIN category_subcategory_mapping csm ON c.subcategory_mapping_id = csm.id
+JOIN claim_subcategories cs ON csm.subcategory_id = cs.id
+WHERE 
+  c.created_at BETWEEN '2025-01-01' AND '2025-04-30'
+  AND c.amount > 100.00
+  AND c.status NOT IN ('rejected', 'processed')
+  AND (
+    cc.category_name = 'Office Expenses'
+    OR cc.category_name = 'Tools and Equipment'
+  )
+  AND (
+    c.description ILIKE '%computer%'
+    OR c.description ILIKE '%software%'
+    OR c.description ILIKE '%license%'
+  )
+ORDER BY c.created_at DESC;
+
+-- Example 7: Simple DELETE operations with safeguards
+BEGIN;
+-- Delete a claim safely
+DELETE FROM claims
+WHERE id = '1f2e3d4c-5b6a-7980-8f9e-0a1b2c3d4e5f'
+AND status = 'pending' -- Only delete if still pending
+RETURNING id, description, amount;
+
+-- Delete a category-subcategory mapping if not in use
+DELETE FROM category_subcategory_mapping
+WHERE category_id = 'ae31baca-e352-4bfb-9514-5c4b4b5f8e7a'
+AND subcategory_id = '7a6b5c4d-3e2f-1g0h-9i8j-7k6l5m4n3o2p'
+AND NOT EXISTS (
+  SELECT 1 FROM claims
+  WHERE subcategory_mapping_id = category_subcategory_mapping.id
+);
+
+COMMIT;

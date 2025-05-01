@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { 
   FileText, 
   Clock,
@@ -9,6 +10,8 @@ import {
 } from 'lucide-vue-next'
 import { ref, onMounted, computed } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
 
 definePageMeta({
   layout: 'employee',
@@ -22,9 +25,15 @@ const user = useSupabaseUser()
 const reimbursementRequests = ref([])
 const loading = ref(true)
 const error = ref(null)
+const categories = ref({})
+const subcategories = ref({})
 
 // Store signed URLs for receipts
 const receiptSignedUrls = ref({})
+
+// Add these variables for receipt viewing
+const viewingReceipt = ref(false)
+const currentReceiptUrl = ref('')
 
 // Function to get correct URL for receipt
 const getReceiptUrl = async (url, requestId) => {
@@ -37,19 +46,34 @@ const getReceiptUrl = async (url, requestId) => {
   }
   
   try {
-    // Get signed URL from Supabase storage (authenticated)
     const { data, error } = await client.storage
       .from('receipts')
-      .createSignedUrl(url, 60 * 60) // 1 hour expiry
+      .createSignedUrl(url, 60 * 60)
     
     if (error) throw error
     
-    // Store the signed URL
+    // Only store the signed URL without showing modal
     receiptSignedUrls.value[requestId] = data?.signedUrl || null
     return data?.signedUrl || null
   } catch (err) {
     console.error('Error getting signed URL:', err)
     return null
+  }
+}
+
+// Add viewReceipt function
+const viewReceipt = async (receiptUrl, requestId) => {
+  if (!receiptUrl) return
+  
+  try {
+    if (!receiptSignedUrls.value[requestId]) {
+      await getReceiptUrl(receiptUrl, requestId)
+    }
+    
+    currentReceiptUrl.value = receiptSignedUrls.value[requestId]
+    viewingReceipt.value = true
+  } catch (err) {
+    console.error('Error viewing receipt:', err)
   }
 }
 
@@ -64,7 +88,7 @@ const prepareReceiptUrls = async () => {
   }
 }
 
-// Fetch reimbursement requests for the current user
+// Fetch categories and reimbursement requests
 const fetchReimbursementRequests = async () => {
   try {
     loading.value = true
@@ -75,19 +99,49 @@ const fetchReimbursementRequests = async () => {
     }
     
     const { data, error: fetchError } = await client
-      .from('reimbursement_requests')
-      .select('*')
+      .from('claims')
+      .select(`
+        id,
+        description,
+        amount,
+        gst_amount,
+        pst_amount,
+        job_number,
+        license_number,
+        client_name,
+        company_name,
+        related_employee,
+        is_travel,
+        start_location,
+        destination,
+        receipt_url,
+        status,
+        date,
+        created_at,
+        employee_id,
+        employee:employee_id (
+          first_name,
+          last_name
+        ),
+        claim_categories (
+          category_name,
+          requires_license_number
+        ),
+        category_subcategory_mapping (
+          claim_subcategories (
+            subcategory_name
+          )
+        )
+      `)
       .eq('employee_id', user.value.id)
       .order('created_at', { ascending: false })
     
     if (fetchError) throw fetchError
     
     reimbursementRequests.value = data || []
-    
-    // Prepare receipt URLs after fetching data
     await prepareReceiptUrls()
   } catch (err) {
-    console.error('Error fetching reimbursement requests:', err)
+    console.error('Error:', err)
     error.value = err.message
   } finally {
     loading.value = false
@@ -128,142 +182,208 @@ const formatStatus = (status) => {
     .join(' ');
 }
 
-// Format category text (capitalize first letter of each word)
-const formatCategory = (category) => {
-  if (!category) return 'Uncategorized';
-  
-  return category.split('_')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+// Format category text
+const formatCategory = (categoryId) => {
+  if (!categoryId) return 'Uncategorized'
+  return categories.value[categoryId] || 'Unknown Category'
 }
 </script>
 
 <template>
-  <div>
+  <div class="text-sm">
+    <!-- Header -->
     <div class="flex justify-between items-center mb-6">
-      <h1 class="text-responsive-2xl font-semibold tracking-tight">Reimbursement Dashboard</h1>
-      <NuxtLink to="/e/add-expense" class="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md">
+      <h1 class="text-xl font-semibold tracking-tight">Reimbursement Dashboard</h1>
+      <NuxtLink to="/e/add-expense" class="flex items-center gap-2 bg-primary text-primary-foreground px-3 py-1.5 rounded-md text-sm">
         <Plus class="h-4 w-4" />
         Add Expense
       </NuxtLink>
     </div>
     
-    <div class="grid gap-4 md:grid-cols-3 mb-6">
-      <Card>
-        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle class="text-responsive-sm font-medium">Pending Requests</CardTitle>
-          <Clock class="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div class="text-responsive-2xl font-bold">{{ reimbursementRequests.filter(r => r.status === 'pending').length }}</div>
-          <p class="text-responsive-xs text-muted-foreground">Awaiting approval</p>
-        </CardContent>
-      </Card>
-      
-      <Card>
-        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle class="text-responsive-sm font-medium">Completed</CardTitle>
-          <CheckCircle class="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div class="text-responsive-2xl font-bold">{{ reimbursementRequests.filter(r => r.status === 'completed').length }}</div>
-          <p class="text-responsive-xs text-muted-foreground">Fully processed</p>
-        </CardContent>
-      </Card>
-      
-      <Card>
-        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle class="text-responsive-sm font-medium">Rejected</CardTitle>
-          <XCircle class="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div class="text-responsive-2xl font-bold">{{ reimbursementRequests.filter(r => r.status === 'rejected').length }}</div>
-          <p class="text-responsive-xs text-muted-foreground">Requires revision</p>
-        </CardContent>
-      </Card>
+    <!-- Stats Cards -->
+    <div class="grid gap-6 md:grid-cols-3 mb-8">
+      <!-- Loading State -->
+      <template v-if="loading">
+        <Card v-for="i in 3" :key="i">
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
+            <Skeleton class="h-4 w-[100px]" />
+            <Skeleton class="h-4 w-4 rounded-full" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton class="h-8 w-[60px] mb-2" />
+            <Skeleton class="h-3 w-[100px]" />
+          </CardContent>
+        </Card>
+      </template>
+
+      <!-- Loaded State -->
+      <template v-else>
+        <Card>
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
+            <CardTitle class="text-responsive-sm font-medium">Pending Requests</CardTitle>
+            <Clock class="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div class="text-responsive-2xl font-bold mb-2">{{ reimbursementRequests.filter(r => r.status === 'pending').length }}</div>
+            <p class="text-responsive-xs text-muted-foreground">Awaiting approval</p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
+            <CardTitle class="text-responsive-sm font-medium">Completed</CardTitle>
+            <CheckCircle class="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div class="text-responsive-2xl font-bold mb-2">{{ reimbursementRequests.filter(r => r.status === 'processed').length }}</div>
+            <p class="text-responsive-xs text-muted-foreground">Fully processed</p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
+            <CardTitle class="text-responsive-sm font-medium">Rejected</CardTitle>
+            <XCircle class="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div class="text-responsive-2xl font-bold mb-2">{{ reimbursementRequests.filter(r => r.status === 'rejected').length }}</div>
+            <p class="text-responsive-xs text-muted-foreground">Requires revision</p>
+          </CardContent>
+        </Card>
+      </template>
     </div>
     
+    <!-- Main Table Card -->
     <Card>
       <CardHeader>
-        <CardTitle>Reimbursement History</CardTitle>
-        <CardDescription>Your recent expense submissions</CardDescription>
+        <CardTitle class="text-base">Reimbursement History</CardTitle>
+        <CardDescription class="text-xs">Your recent expense submissions</CardDescription>
       </CardHeader>
       <CardContent>
-        <div v-if="loading" class="text-center py-4">
-          <p class="text-muted-foreground">Loading your reimbursement requests...</p>
+        <!-- Loading State -->
+        <div v-if="loading">
+          <Table>
+            <TableHeader class="bg-gray-100">
+              <TableRow>
+                <TableHead v-for="header in ['Description', 'Amount', 'Job #', 'Category', 'Date', 'Status', 'Receipt']" 
+                           :key="header" 
+                           class="uppercase text-xs font-medium"
+                >
+                  {{ header }}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="i in 5" :key="i">
+                <TableCell v-for="j in 7" :key="j" class="py-3">
+                  <Skeleton :class="{'h-3 w-full': j === 1, 
+                                   'h-3 w-16': j === 2, 
+                                   'h-3 w-12': j === 3,
+                                   'h-3 w-24': j === 4,
+                                   'h-3 w-20': j === 5,
+                                   'h-5 w-20': j === 6,
+                                   'h-7 w-16': j === 7}" />
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </div>
+        
+        <!-- Error State -->
         <div v-else-if="error" class="text-center py-4">
-          <p class="text-red-500">Error: {{ error }}</p>
+          <p class="text-red-500 text-xs">Error: {{ error }}</p>
         </div>
-        <div v-else class="space-y-4">
-          <div v-if="reimbursementRequests.length === 0" class="text-center py-4 text-muted-foreground">
-            No reimbursement requests found
+        
+        <!-- Content State -->
+        <div v-else>
+          <div v-if="reimbursementRequests.length === 0" class="text-center py-4">
+            <p class="text-muted-foreground text-xs">No reimbursement requests found</p>
           </div>
-          <div v-else class="overflow-x-auto">
-            <table class="w-full">
-              <thead>
-                <tr class="border-b">
-                  <th class="text-left py-2 px-4 font-medium text-responsive-sm">Description</th>
-                  <th class="text-left py-2 px-4 font-medium text-responsive-sm">Amount</th>
-                  <th class="text-left py-2 px-4 font-medium text-responsive-sm">Job #</th>
-                  <th class="text-left py-2 px-4 font-medium text-responsive-sm">Category</th>
-                  <th class="text-left py-2 px-4 font-medium text-responsive-sm">Date</th>
-                  <th class="text-left py-2 px-4 font-medium text-responsive-sm">Status</th>
-                  <th class="text-left py-2 px-4 font-medium text-responsive-sm">Receipt</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="request in topFiveRequests" :key="request.id" class="border-b">
-                  <td class="py-2 px-4 text-responsive-sm">{{ request.description }}</td>
-                  <td class="py-2 px-4 text-responsive-sm">{{ formatCurrency(request.amount) }}</td>
-                  <td class="py-2 px-4 text-responsive-sm">{{ request.job_number || 'N/A' }}</td>
-                  <td class="py-2 px-4 text-responsive-sm">{{ formatCategory(request.category) }}</td>
-                  <td class="py-2 px-4 text-responsive-sm">{{ formatDate(request.created_at) }}</td>
-                  <td class="py-2 px-4">
+          <div v-else>
+            <Table>
+              <TableHeader class="bg-gray-100">
+                <TableRow>
+                  <TableHead class="uppercase text-xs font-medium">Reference #</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Category</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Description</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Amount</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Date</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Status</TableHead>
+                  <TableHead class="uppercase text-xs font-medium">Receipt</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="request in topFiveRequests" :key="request.id">
+                  <TableCell class="text-xs py-3">
+                    <template v-if="request.claim_categories?.requires_license_number">
+                      License: {{ request.license_number || 'N/A' }}
+                    </template>
+                    <template v-else>
+                      Job: {{ request.job_number || 'N/A' }}
+                    </template>
+                  </TableCell>
+                  <TableCell class="text-xs py-3">
+                    <div class="font-medium">{{ request.claim_categories?.category_name }}</div>
+                    <div class="text-muted-foreground">{{ request.category_subcategory_mapping?.claim_subcategories?.subcategory_name }}</div>
+                  </TableCell>
+                  <TableCell class="text-xs py-3">
+                    <div class="font-medium">Note: {{ request.description }}</div>
+                    <div v-if="request.related_employee" class="text-muted-foreground">
+                      Employee: {{ request.related_employee }}
+                    </div>
+                    <div v-if="request.client_name || request.company_name" class="text-muted-foreground">
+                      Client: {{ request.client_name }}
+                      <template v-if="request.company_name">
+                        ({{ request.company_name }})
+                      </template>
+                    </div>
+                    <div v-if="request.is_travel" class="text-muted-foreground">
+                      From: {{ request.start_location }}<br>
+                      To: {{ request.destination }}
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-xs py-3">
+                    <div>{{ formatCurrency(request.amount) }}</div>
+                    <div class="text-muted-foreground">
+                      GST: {{ formatCurrency(request.gst_amount || 0) }}<br>
+                      PST: {{ formatCurrency(request.pst_amount || 0) }}
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-xs py-3">{{ formatDate(request.date) }}</TableCell>
+                  <TableCell class="py-3">
                     <span 
                       :class="{
                         'bg-yellow-100 text-yellow-800': request.status === 'pending',
-                        'bg-green-100 text-green-800': request.status === 'approved' || 
-                                                      request.status === 'admin_verified' || 
-                                                      request.status === 'manager_approved' || 
-                                                      request.status === 'completed',
+                        'bg-green-100 text-green-800': ['approved', 'verified', 'processed'].includes(request.status),
                         'bg-red-100 text-red-800': request.status === 'rejected'
                       }"
-                      class="px-2 py-1 rounded-full text-responsive-xs font-medium"
+                      class="px-2 py-0.5 rounded-full text-xs font-medium inline-flex items-center gap-1"
                     >
+                      <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
+                      <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
+                      <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
                       {{ formatStatus(request.status) }}
                     </span>
-                  </td>
-                  <td class="py-2 px-4">
+                  </TableCell>
+                  <TableCell class="py-3">
                     <Button 
-                      v-if="request.receipt_url && receiptSignedUrls[request.id]" 
-                      :href="receiptSignedUrls[request.id]" 
-                      target="_blank" 
+                      v-if="request.receipt_url" 
+                      @click="viewReceipt(request.receipt_url, request.id)" 
                       size="sm"
                       variant="outline"
-                      class="flex items-center gap-1"
+                      class="h-7 text-xs"
                     >
-                      <FileText class="h-3 w-3" />
+                      <FileText class="h-3 w-3 mr-1" />
                       View
                     </Button>
-                    <Button 
-                      v-else-if="request.receipt_url" 
-                      @click="getReceiptUrl(request.receipt_url, request.id)" 
-                      size="sm"
-                      variant="outline"
-                      class="flex items-center gap-1"
-                    >
-                      <FileText class="h-3 w-3" />
-                      Load
-                    </Button>
-                    <span v-else class="text-muted-foreground text-responsive-xs">No receipt</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                    <span v-else class="text-muted-foreground text-xs">No receipt</span>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
             
             <div class="flex justify-end mt-4">
-              <Button variant="outline" size="sm" @click="$router.push('/e/all-expenses')">
+              <Button variant="outline" size="sm" @click="$router.push('/e/expenses')" class="text-xs">
                 View All Requests
               </Button>
             </div>
@@ -271,5 +391,21 @@ const formatCategory = (category) => {
         </div>
       </CardContent>
     </Card>
+
+    <!-- Receipt Dialog -->
+    <Dialog v-model:open="viewingReceipt">
+      <DialogContent class="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle class="text-sm">Receipt</DialogTitle>
+        </DialogHeader>
+        <div class="h-[70vh] overflow-auto">
+          <iframe 
+            v-if="currentReceiptUrl" 
+            :src="currentReceiptUrl" 
+            class="w-full h-full"
+          ></iframe>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
