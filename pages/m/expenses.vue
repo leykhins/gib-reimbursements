@@ -78,6 +78,11 @@ const verifyingRequests = ref<string[]>([])
 const showSuccessModal = ref(false)
 const successMessage = ref('')
 
+// Add the refs for rejection modal
+const showRejectModal = ref(false)
+const rejectingRequestId = ref(null)
+const rejectionReason = ref('')
+
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
   try {
@@ -345,6 +350,18 @@ const toggleEmployee = (employeeId) => {
 const toggleCategory = (employeeId, categoryId) => {
   const key = `${employeeId}-${categoryId}`
   expandedCategories.value[key] = !expandedCategories.value[key]
+  
+  // If the category is being expanded, also expand all job groups
+  if (expandedCategories.value[key]) {
+    // Get all job groups for this category
+    const category = organizedData.value[employeeId]?.categories[categoryId]
+    if (category) {
+      Object.keys(category.jobGroups).forEach(jobNumber => {
+        const jobKey = `${employeeId}-${categoryId}-${jobNumber}`
+        expandedJobs.value[jobKey] = true
+      })
+    }
+  }
 }
 
 // Format helpers
@@ -526,24 +543,36 @@ const rejectRequest = async (requestId) => {
     return
   }
   
+  rejectingRequestId.value = requestId
+  rejectionReason.value = ''
+  showRejectModal.value = true
+}
+
+// Add this function to handle the actual rejection
+const confirmRejection = async () => {
   try {
     const { error } = await client
       .from('claims')
       .update({
         status: 'rejected',
         manager_approved_by: user.value.id,
-        manager_approved_at: new Date().toISOString()
+        manager_approved_at: new Date().toISOString(),
+        rejection_reason: rejectionReason.value
       })
-      .eq('id', requestId)
-
+      .eq('id', rejectingRequestId.value)
+    
     if (error) throw error
-
+    
+    // Show success message
     toast({
       title: 'Success',
       description: 'Request rejected successfully',
       variant: 'default'
     })
-
+    
+    showRejectModal.value = false
+    
+    // Refresh the list
     await fetchReimbursementRequests()
   } catch (err) {
     console.error('Error rejecting request:', err)
@@ -1065,6 +1094,32 @@ onMounted(async () => {
       </div>
       <div class="flex justify-end mt-4">
         <Button @click="viewingReceipt = false">Close</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+
+  <!-- Reject Request Modal -->
+  <Dialog v-model:open="showRejectModal">
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Reject Request</DialogTitle>
+        <DialogDescription>
+          Please provide a reason for rejecting this request.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="mt-4">
+        <Label for="rejection-reason">Rejection Reason</Label>
+        <Input id="rejection-reason" v-model="rejectionReason" />
+      </div>
+      <div class="flex justify-end space-x-2 mt-4">
+        <Button variant="outline" @click="showRejectModal = false">Cancel</Button>
+        <Button 
+          class="bg-red-600 hover:bg-red-700 text-white"
+          @click="confirmRejection"
+          :disabled="!rejectionReason.trim()"
+        >
+          Reject
+        </Button>
       </div>
     </DialogContent>
   </Dialog>

@@ -71,6 +71,11 @@ const verifyingRequests = ref([])
 const showSuccessModal = ref(false)
 const successMessage = ref('')
 
+// Add these new refs after the existing ones in the script section
+const showRejectModal = ref(false)
+const rejectingRequestId = ref(null)
+const rejectionReason = ref('')
+
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
   try {
@@ -305,9 +310,22 @@ const toggleEmployee = (employeeId) => {
   expandedEmployees.value[employeeId] = !expandedEmployees.value[employeeId]
 }
 
+// Toggle category function with auto-expand of jobs
 const toggleCategory = (employeeId, categoryId) => {
   const key = `${employeeId}-${categoryId}`
   expandedCategories.value[key] = !expandedCategories.value[key]
+  
+  // If the category is being expanded, also expand all job groups
+  if (expandedCategories.value[key]) {
+    // Get all job groups for this category
+    const category = organizedData.value[employeeId]?.categories[categoryId]
+    if (category) {
+      Object.keys(category.jobGroups).forEach(jobNumber => {
+        const jobKey = `${employeeId}-${categoryId}-${jobNumber}`
+        expandedJobs.value[jobKey] = true
+      })
+    }
+  }
 }
 
 // Format helpers
@@ -514,26 +532,38 @@ const toggleJob = (employeeId, categoryKey, jobNumber) => {
   expandedJobs.value[key] = !expandedJobs.value[key]
 }
 
-// Add this function near the other request handling functions
+// Replace the existing rejectRequest function with this updated version
 const rejectRequest = async (requestId) => {
+  rejectingRequestId.value = requestId
+  rejectionReason.value = ''
+  showRejectModal.value = true
+}
+
+// Add this new function to handle the actual rejection
+const confirmRejection = async () => {
   try {
     const { error } = await client
       .from('claims')
       .update({
         status: 'rejected',
         admin_verified_by: user.value.id,
-        admin_verified_at: new Date().toISOString()
+        admin_verified_at: new Date().toISOString(),
+        rejection_reason: rejectionReason.value
       })
-      .eq('id', requestId)
-
+      .eq('id', rejectingRequestId.value)
+    
     if (error) throw error
-
+    
+    // Show success message
     toast({
       title: 'Success',
-      description: 'Request rejected successfully',
+      description: 'Request has been rejected',
       variant: 'default'
     })
-
+    
+    showRejectModal.value = false
+    
+    // Refresh the list
     await fetchReimbursementRequests()
   } catch (err) {
     console.error('Error rejecting request:', err)
@@ -780,149 +810,158 @@ onMounted(async () => {
                   </div>
                 </div>
                 
-                <!-- Add transition to Request Details -->
-                <div v-if="expandedCategories[`${employeeId}-${categoryId}`]">
-                  <div v-for="(jobGroup, jobNumber) in organizedData[employeeId].categories[categoryId].jobGroups" 
-                       :key="jobNumber" 
-                       class="border-t">
-                    <!-- Job Header -->
-                    <div 
-                      class="flex justify-between items-center p-2 bg-muted/30 cursor-pointer hover:bg-muted/50"
-                      @click="toggleJob(employeeId, categoryId, jobNumber)"
-                    >
-                      <div class="flex items-center gap-2">
-                        <ChevronDown v-if="!expandedJobs[`${employeeId}-${categoryId}-${jobNumber}`]" class="h-4 w-4" />
-                        <ChevronUp v-else class="h-4 w-4" />
-                        <span class="font-medium">Job #{{ jobNumber }}</span>
-                        <span class="text-sm text-muted-foreground">
-                          ({{ jobGroup.requests.length }} items - Total: {{ formatCurrency(jobGroup.total) }})
-                        </span>
+                <!-- Category content with transition -->
+                <Transition
+                  enter-active-class="transition-all duration-300 ease-out"
+                  enter-from-class="opacity-0 -translate-y-2"
+                  enter-to-class="opacity-100 translate-y-0"
+                  leave-active-class="transition-all duration-200 ease-in"
+                  leave-from-class="opacity-100 translate-y-0"
+                  leave-to-class="opacity-0 -translate-y-2"
+                >
+                  <div v-if="expandedCategories[`${employeeId}-${categoryId}`]">
+                    <div v-for="(jobGroup, jobNumber) in organizedData[employeeId].categories[categoryId].jobGroups" 
+                         :key="jobNumber" 
+                         class="border-t">
+                      <!-- Job Header -->
+                      <div 
+                        class="flex justify-between items-center p-2 bg-muted/30 cursor-pointer hover:bg-muted/50"
+                        @click="toggleJob(employeeId, categoryId, jobNumber)"
+                      >
+                        <div class="flex items-center gap-2">
+                          <ChevronDown v-if="!expandedJobs[`${employeeId}-${categoryId}-${jobNumber}`]" class="h-4 w-4" />
+                          <ChevronUp v-else class="h-4 w-4" />
+                          <span class="font-medium">Job #{{ jobNumber }}</span>
+                          <span class="text-sm text-muted-foreground">
+                            ({{ jobGroup.requests.length }} items - Total: {{ formatCurrency(jobGroup.total) }})
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                    
-                    <!-- Job Entries Table -->
-                    <Transition
-                      enter-active-class="transition-all duration-300 ease-out"
-                      enter-from-class="opacity-0 -translate-y-2"
-                      enter-to-class="opacity-100 translate-y-0"
-                      leave-active-class="transition-all duration-200 ease-in"
-                      leave-from-class="opacity-100 translate-y-0"
-                      leave-to-class="opacity-0 -translate-y-2"
-                    >
-                      <div v-if="expandedJobs[`${employeeId}-${categoryId}-${jobNumber}`]" class="border-t">
-                        <Table>
-                          <TableHeader>
-                            <TableRow class="bg-muted/50 hover:bg-muted/50">
-                              <TableHead class="w-[50px]"></TableHead>
-                              <TableHead class="uppercase">Date</TableHead>
-                              <TableHead class="uppercase">Description</TableHead>
-                              <TableHead class="uppercase">Amount</TableHead>
-                              <TableHead class="uppercase">Status</TableHead>
-                              <TableHead class="uppercase">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            <TableRow 
-                              v-for="request in jobGroup.requests" 
-                              :key="request.id"
-                              class="hover:bg-muted/50"
-                            >
-                              <TableCell class="py-2">
-                                <input
-                                  v-if="request.status === 'pending'"
-                                  type="checkbox"
-                                  :checked="selectedRequests.has(request.id)"
-                                  @change="checked => checked.target.checked ? 
-                                    selectedRequests.add(request.id) : 
-                                    selectedRequests.delete(request.id)"
-                                  class="white-checkbox"
-                                />
-                              </TableCell>
-                              <TableCell class="py-2 text-sm">{{ formatDate(request.date) }}</TableCell>
-                              <TableCell class="py-2">
-                                <div class="text-sm">{{ request.description }}</div>
-                                <div v-if="request.subcategory_mapping?.subcategory?.subcategory_name" 
-                                     class="text-xs text-muted-foreground mt-1">
-                                  {{ request.subcategory_mapping.subcategory.subcategory_name }}
-                                </div>
-                                <div v-if="request.related_employee" class="text-xs text-muted-foreground">
-                                  Employee: {{ request.related_employee }}
-                                </div>
-                                <div v-if="request.client_name || request.company_name" class="text-xs text-muted-foreground">
-                                  Client: {{ request.client_name }}
-                                  <template v-if="request.company_name">
-                                    ({{ request.company_name }})
-                                  </template>
-                                </div>
-                                <div v-if="request.is_travel" class="text-xs text-muted-foreground">
-                                  From: {{ request.start_location }}<br>
-                                  To: {{ request.destination }}
-                                </div>
-                              </TableCell>
-                              <TableCell class="py-2">
-                                    <div>{{ formatCurrency(request.amount) }}</div>
-                                    <div class="text-xs text-muted-foreground">
-                                    <div>GST: {{ formatCurrency(request.gst_amount) }}</div>
-                                    <div>PST: {{ formatCurrency(request.pst_amount) }}</div>
-                                    </div>
+                      
+                      <!-- Job Entries Table -->
+                      <Transition
+                        enter-active-class="transition-all duration-300 ease-out"
+                        enter-from-class="opacity-0 -translate-y-2"
+                        enter-to-class="opacity-100 translate-y-0"
+                        leave-active-class="transition-all duration-200 ease-in"
+                        leave-from-class="opacity-100 translate-y-0"
+                        leave-to-class="opacity-0 -translate-y-2"
+                      >
+                        <div v-if="expandedJobs[`${employeeId}-${categoryId}-${jobNumber}`]" class="border-t">
+                          <Table>
+                            <TableHeader>
+                              <TableRow class="bg-muted/50 hover:bg-muted/50">
+                                <TableHead class="w-[50px]"></TableHead>
+                                <TableHead class="uppercase">Date</TableHead>
+                                <TableHead class="uppercase">Description</TableHead>
+                                <TableHead class="uppercase">Amount</TableHead>
+                                <TableHead class="uppercase">Status</TableHead>
+                                <TableHead class="uppercase">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              <TableRow 
+                                v-for="request in jobGroup.requests" 
+                                :key="request.id"
+                                class="hover:bg-muted/50"
+                              >
+                                <TableCell class="py-2">
+                                  <input
+                                    v-if="request.status === 'pending'"
+                                    type="checkbox"
+                                    :checked="selectedRequests.has(request.id)"
+                                    @change="checked => checked.target.checked ? 
+                                      selectedRequests.add(request.id) : 
+                                      selectedRequests.delete(request.id)"
+                                    class="white-checkbox"
+                                  />
+                                </TableCell>
+                                <TableCell class="py-2 text-sm">{{ formatDate(request.date) }}</TableCell>
+                                <TableCell class="py-2">
+                                  <div class="text-sm">{{ request.description }}</div>
+                                  <div v-if="request.subcategory_mapping?.subcategory?.subcategory_name" 
+                                       class="text-xs text-muted-foreground mt-1">
+                                    {{ request.subcategory_mapping.subcategory.subcategory_name }}
+                                  </div>
+                                  <div v-if="request.related_employee" class="text-xs text-muted-foreground">
+                                    Employee: {{ request.related_employee }}
+                                  </div>
+                                  <div v-if="request.client_name || request.company_name" class="text-xs text-muted-foreground">
+                                    Client: {{ request.client_name }}
+                                    <template v-if="request.company_name">
+                                      ({{ request.company_name }})
+                                    </template>
+                                  </div>
+                                  <div v-if="request.is_travel" class="text-xs text-muted-foreground">
+                                    From: {{ request.start_location }}<br>
+                                    To: {{ request.destination }}
+                                  </div>
                                 </TableCell>
                                 <TableCell class="py-2">
-                                    <span :class="[
-                                    'inline-flex items-center px-2 py-0.5 rounded-full text-xs gap-1', 
-                                    getStatusClass(request.status)
-                                    ]">
-                                        <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
-                                        <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
-                                        <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
-                                        <span class="font-medium">
-                                            {{ formatStatus(request.status) }}
-                                            <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">- {{ request.rejection_reason }}</span>
-                                        </span>
-                                    </span>
+                                      <div>{{ formatCurrency(request.amount) }}</div>
+                                      <div class="text-xs text-muted-foreground">
+                                      <div>GST: {{ formatCurrency(request.gst_amount) }}</div>
+                                      <div>PST: {{ formatCurrency(request.pst_amount) }}</div>
+                                      </div>
+                                  </TableCell>
+                                  <TableCell class="py-2">
+                                      <span :class="[
+                                      'inline-flex items-center px-2 py-0.5 rounded-full text-xs gap-1', 
+                                      getStatusClass(request.status)
+                                      ]">
+                                          <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
+                                          <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
+                                          <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
+                                          <span class="font-medium">
+                                              {{ formatStatus(request.status) }}
+                                              <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">- {{ request.rejection_reason }}</span>
+                                          </span>
+                                      </span>
+                                  </TableCell>
+                                <TableCell class="py-2">
+                                  <div class="flex space-x-2">
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      @click="viewReceipt(request.receipt_url)"
+                                      :disabled="!request.receipt_url"
+                                      class="h-7 w-7 p-0 rounded-md"
+                                      title="View Receipt"
+                                    >
+                                      <FileText class="h-4 w-4" /> 
+                                    </Button>
+                                    
+                                    <Button 
+                                      v-if="request.status === 'pending'"
+                                      variant="outline" 
+                                      size="sm"
+                                      class="h-7 w-7 p-0 bg-green-100 hover:bg-green-200 text-green-800 rounded-md"
+                                      @click="verifySelectedRequests(request.id)"
+                                      title="Approve Request"
+                                    >
+                                      <CheckCircle2 class="h-4 w-4" />
+                                    </Button>
+                                    
+                                    <Button 
+                                      v-if="request.status === 'pending'"
+                                      variant="outline" 
+                                      size="sm"
+                                      class="h-7 w-7 p-0 bg-red-100 hover:bg-red-200 text-red-800 rounded-md"
+                                      @click="rejectRequest(request.id)"
+                                      title="Reject Request"
+                                    >
+                                      <XCircle class="h-4 w-4" />
+                                    </Button>
+                                  </div>
                                 </TableCell>
-                              <TableCell class="py-2">
-                                <div class="flex space-x-2">
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm"
-                                    @click="viewReceipt(request.receipt_url)"
-                                    :disabled="!request.receipt_url"
-                                    class="h-7 w-7 p-0 rounded-md"
-                                    title="View Receipt"
-                                  >
-                                    <FileText class="h-4 w-4" /> 
-                                  </Button>
-                                  
-                                  <Button 
-                                    v-if="request.status === 'pending'"
-                                    variant="outline" 
-                                    size="sm"
-                                    class="h-7 w-7 p-0 bg-green-100 hover:bg-green-200 text-green-800 rounded-md"
-                                    @click="verifySelectedRequests(request.id)"
-                                    title="Approve Request"
-                                  >
-                                    <CheckCircle2 class="h-4 w-4" />
-                                  </Button>
-                                  
-                                  <Button 
-                                    v-if="request.status === 'pending'"
-                                    variant="outline" 
-                                    size="sm"
-                                    class="h-7 w-7 p-0 bg-red-100 hover:bg-red-200 text-red-800 rounded-md"
-                                    @click="rejectRequest(request.id)"
-                                    title="Reject Request"
-                                  >
-                                    <XCircle class="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </Transition>
+                              </TableRow>
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </Transition>
+                    </div>
                   </div>
-                </div>
+                </Transition>
               </div>
             </div>
           </Transition>
@@ -979,6 +1018,32 @@ onMounted(async () => {
         </DialogHeader>
         <div class="flex justify-end mt-4">
           <Button @click="showSuccessModal = false">Close</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Reject Request Modal -->
+    <Dialog v-model:open="showRejectModal">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Reject Request</DialogTitle>
+          <DialogDescription>
+            Please provide a reason for rejecting this request.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="mt-4">
+          <Label for="rejection-reason">Rejection Reason</Label>
+          <Input id="rejection-reason" v-model="rejectionReason" />
+        </div>
+        <div class="flex justify-end space-x-2 mt-4">
+          <Button variant="outline" @click="showRejectModal = false">Cancel</Button>
+          <Button 
+            class="bg-red-600 hover:bg-red-700 text-white"
+            @click="confirmRejection"
+            :disabled="!rejectionReason.trim()"
+          >
+            Reject
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
