@@ -436,7 +436,7 @@ const deleteFile = async (expenseId: number): Promise<void> => {
 }
 
 
-// Updated confirmSubmit function to pass the date directly
+// Updated confirmSubmit function to submit directly
 const confirmSubmit = async () => {
   try {
     loading.value = true;
@@ -450,9 +450,6 @@ const confirmSubmit = async () => {
       }
       
       const isTravel = categoryName.includes('mileage') || categoryName.includes('travel');
-      
-      // Use date-fns format function to convert date to ISO format
-      // const formattedDate = formatISO(expense.date, { representation: 'date' });
       
       return {
         employee_id: user.value.id,
@@ -480,28 +477,8 @@ const confirmSubmit = async () => {
       };
     });
     
-    debugData.value = expensesData;
-    showDebugModal.value = true;
-    showConfirmModal.value = false;
-    
-  } catch (err) {
-    console.error('Error preparing expenses:', err);
-    error.value = typeof err === 'object' && err !== null && 'message' in err 
-      ? String(err.message) 
-      : 'Failed to prepare expenses. Please try again.';
-    showConfirmModal.value = false;
-  } finally {
-    loading.value = false;
-  }
-}
-
-// Add new function to handle actual submission
-const proceedWithSubmission = async () => {
-  try {
-    loading.value = true
-    
-    // Submit each expense
-    for (const expenseData of debugData.value) {
+    // Submit each expense directly
+    for (const expenseData of expensesData) {
       const { data: expenseResult, error: expenseError } = await client
         .from('claims')
         .insert(expenseData)
@@ -513,17 +490,18 @@ const proceedWithSubmission = async () => {
       }
     }
     
-    // Close debug modal and navigate to dashboard
-    showDebugModal.value = false
-    navigateTo('/e/')
+    // Close modal and navigate to dashboard
+    showConfirmModal.value = false;
+    navigateTo('/e/');
     
   } catch (err) {
-    console.error('Error submitting expenses:', err)
+    console.error('Error submitting expenses:', err);
     error.value = typeof err === 'object' && err !== null && 'message' in err 
       ? String(err.message) 
-      : 'Failed to submit expenses. Please try again.'
+      : 'Failed to submit expenses. Please try again.';
+    showConfirmModal.value = false;
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
@@ -1288,29 +1266,5 @@ const inputDate = ref<DateValue>()
         </div>
       </div>
     </div>
-
-    <!-- Debug Modal -->
-    <Dialog v-model:open="showDebugModal">
-      <DialogContent class="max-w-4xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Debug: Expense Submission Data</DialogTitle>
-          <DialogDescription>
-            Review the data that will be sent to the database
-          </DialogDescription>
-        </DialogHeader>
-        
-        <div class="mt-4">
-          <pre class="bg-gray-100 p-4 rounded-md overflow-x-auto">{{ JSON.stringify(debugData, null, 2) }}</pre>
-        </div>
-        
-        <div class="flex justify-end space-x-2 mt-4">
-          <Button variant="outline" @click="showDebugModal = false">Cancel</Button>
-          <Button @click="proceedWithSubmission" :disabled="loading">
-            <span v-if="loading">Submitting...</span>
-            <span v-else>Proceed with Submission</span>
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
   </div>
 </template>
