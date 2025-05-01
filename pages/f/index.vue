@@ -5,6 +5,7 @@
   import { DollarSign, Clock, CheckCircle, FileText, ArrowUpRight } from 'lucide-vue-next'
   import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
   import { toast } from '@/components/ui/toast'
+  import { Skeleton } from '@/components/ui/skeleton'
   
   definePageMeta({
     layout: 'accounting',
@@ -215,8 +216,56 @@
 
 <template>
   <div>  
-    <div v-if="loading" class="flex justify-center items-center h-40">
-      <div class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full"></div>
+    <div v-if="loading">
+      <!-- Stats Card Skeletons -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <Card v-for="i in 5" :key="i">
+          <CardHeader class="pb-2">
+            <CardTitle class="text-sm font-medium">
+              <Skeleton class="h-4 w-24" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="flex items-center space-x-2">
+              <Skeleton class="h-4 w-4 rounded-full" />
+              <Skeleton class="h-8 w-16" />
+            </div>
+            <Skeleton class="h-3 w-32 mt-2" />
+          </CardContent>
+        </Card>
+      </div>
+      
+      <!-- Recent Requests Skeleton -->
+      <Card class="mt-6">
+        <CardHeader>
+          <CardTitle><Skeleton class="h-5 w-48" /></CardTitle>
+          <CardDescription><Skeleton class="h-4 w-64" /></CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div class="overflow-x-auto">
+            <Table>
+              <TableHeader class="bg-gray-100">
+                <TableRow>
+                  <TableHead v-for="i in 6" :key="i" class="uppercase text-xs font-medium">
+                    <Skeleton class="h-3 w-24" />
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="i in 5" :key="i">
+                  <TableCell v-for="j in 6" :key="j" class="text-xs py-3">
+                    <Skeleton class="h-4 w-full" />
+                    <Skeleton v-if="j === 2 || j === 4" class="h-3 w-2/3 mt-1" />
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+          <div class="mt-4 flex justify-end">
+            <Skeleton class="h-8 w-40" />
+          </div>
+        </CardContent>
+      </Card>
     </div>
     
     <div v-else-if="error" class="bg-destructive/20 p-4 rounded-md text-destructive">
@@ -271,8 +320,8 @@
           </CardContent>
         </Card>
 
-        <NuxtLink to="/f/process" class="block h-full text-center">
-          <Card class="text-center cursor-pointer hover:bg-gray-50">
+        <NuxtLink to="/f/pending">
+          <Card class="text-center cursor-pointer hover:bg-gray-50 h-full">
             <CardHeader class="pb-2">
             </CardHeader>
             <CardContent class="flex flex-col items-center justify-center">
@@ -285,8 +334,8 @@
           </Card>
         </NuxtLink>
         
-        <NuxtLink to="/f/expenses" class="block h-full">
-          <Card class="text-center content-center cursor-pointer hover:bg-gray-50">
+        <NuxtLink to="/f/expenses">
+          <Card class="text-center content-center cursor-pointer hover:bg-gray-50 h-full">
             <CardHeader class="pb-2">
             </CardHeader>
             <CardContent class="flex flex-col items-center justify-center">
@@ -317,7 +366,6 @@
                   <TableHead class="uppercase text-xs font-medium">Description</TableHead>
                   <TableHead class="uppercase text-xs font-medium">Amount</TableHead>
                   <TableHead class="uppercase text-xs font-medium">Date</TableHead>
-                  <TableHead class="uppercase text-xs font-medium">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -349,15 +397,6 @@
                     </div>
                   </TableCell>
                   <TableCell class="text-xs py-3">{{ formatDate(claim.date) }}</TableCell>
-                  <TableCell class="py-3">
-                    <Button 
-                      size="sm" 
-                      class="h-7 bg-green-600 hover:bg-green-700 text-white"
-                      @click="markAsProcessed(claim.id)"
-                    >
-                      Process
-                    </Button>
-                  </TableCell>
                 </TableRow>
                 <TableRow v-if="recentClaims.length === 0">
                   <TableCell colSpan="7" class="py-4 text-center text-muted-foreground">No pending claims for accounting processing</TableCell>
