@@ -60,6 +60,16 @@ const calculatedDistance = ref(null)
 const calculatedDuration = ref(null)
 
 // Updated interface for Expense with new fields
+interface MileageEntry {
+  jobNumber: string;
+  startLocation: string;
+  destination: string;
+  distance: string;
+  date: Date;
+  datePopoverOpen: boolean;
+  subcategoryMappingId: string;
+}
+
 interface Expense {
   id: number
   jobNumber: string
@@ -83,6 +93,7 @@ interface Expense {
   isCompanyEvent: boolean
   option?: string
   datePopoverOpen: boolean
+  mileageEntries?: MileageEntry[]
 }
 
 // Initialize expenses array with updated structure
@@ -108,7 +119,16 @@ const expenses = ref<Expense[]>([
     companyName: '',
     isOfficeAdmin: false,
     isCompanyEvent: false,
-    datePopoverOpen: false
+    datePopoverOpen: false,
+    mileageEntries: [{ 
+      jobNumber: '',
+      startLocation: '',
+      destination: '',
+      distance: '',
+      date: new Date(),
+      datePopoverOpen: false,
+      subcategoryMappingId: '',
+    }]
   }
 ])
 
@@ -189,19 +209,7 @@ const getSubcategories = computed(() => (expenseId: number) => {
   return dbSubcategories.value.filter(sc => sc.category_id === expense.categoryId)
 })
 
-// Helper function to determine if a subcategory has special requirements
-const getSubcategoryRequirements = (subcategoryId: string) => {
-  const subcategory = dbSubcategories.value.find(sc => sc.id === subcategoryId)
-  if (!subcategory) return {}
-  
-  return {
-    requiresJobNumber: subcategory.requires_job_number,
-    requiresEmployeeName: subcategory.requires_employee_name,
-    requiresClientName: subcategory.requires_client_info
-  }
-}
-
-// Updated showField function - modify GST and PST cases
+// Updated showField function - modify to exclude job number for mileage
 const showField = computed(() => (expenseId: number, fieldName: string) => {
   const expense = expenses.value.find(e => e.id === expenseId)
   if (!expense || !expense.categoryId) return false
@@ -219,6 +227,9 @@ const showField = computed(() => (expenseId: number, fieldName: string) => {
   
   switch (fieldName) {
     case 'jobNumber':
+      // Don't show job number field for mileage categories as each mileage entry has its own job number
+      if (categoryName.includes('mileage')) return false
+      
       return subcategory.requires_job_number === true || 
              subcategoryName.includes('jobsite') || 
              subcategoryName.includes('tender')
@@ -290,7 +301,16 @@ const addExpense = () => {
     companyName: '',
     isOfficeAdmin: false,
     isCompanyEvent: false,
-    datePopoverOpen: false
+    datePopoverOpen: false,
+    mileageEntries: [{ 
+      jobNumber: '', 
+      startLocation: '', 
+      destination: '', 
+      distance: '',
+      date: new Date(),
+      datePopoverOpen: false,
+      subcategoryMappingId: '',
+    }]
   })
   uploadStatus.value[newId] = 'idle'
   uploadProgress.value[newId] = 0
@@ -435,50 +455,107 @@ const deleteFile = async (expenseId: number): Promise<void> => {
   }
 }
 
+// Helper function to truncate address after the first comma
+const truncateAddress = (address) => {
+  if (!address) return '';
+  const commaIndex = address.indexOf(',');
+  return commaIndex > 0 ? address.substring(0, commaIndex) : address;
+};
 
-// Updated confirmSubmit function to submit directly
+// Updated confirmSubmit function with address truncation
 const confirmSubmit = async () => {
   try {
     loading.value = true;
     
-    const expensesData = expenses.value.map(expense => {
+    let allExpensesData = [];
+    
+    expenses.value.forEach(expense => {
       const category = dbCategories.value.find(c => c.id === expense.categoryId);
       const categoryName = category?.name.toLowerCase() || '';
       
-      if (categoryName.includes('meal') && !expense.description) {
-        expense.description = 'Meal expense';
+      if (categoryName.includes('mileage') && expense.mileageEntries && expense.mileageEntries.length > 0) {
+        // For car mileage, create a separate expense for each entry
+        expense.mileageEntries.forEach(entry => {
+          if (!entry.distance || parseFloat(entry.distance) <= 0) {
+            return; // Skip entries with no distance
+          }
+          
+          const amount = (parseFloat(entry.distance) * MILEAGE_RATE).toFixed(2);
+          
+          // Truncate addresses for description
+          const shortStartLocation = truncateAddress(entry.startLocation);
+          const shortDestination = truncateAddress(entry.destination);
+          
+          // Build a basic description with truncated addresses
+          let description = `Mileage: ${shortStartLocation} to ${shortDestination}`;
+          
+          // Add job number to description if it exists and should be shown
+          if (shouldShowJobNumber(entry.subcategoryMappingId) && entry.jobNumber) {
+            description += ` (Job #: ${entry.jobNumber})`;
+          }
+          
+          allExpensesData.push({
+            employee_id: user.value.id,
+            job_number: shouldShowJobNumber(entry.subcategoryMappingId) ? entry.jobNumber : null,
+            description: description,
+            amount: parseFloat(amount),
+            gst_amount: 0,
+            pst_amount: 0,
+            date: entry.date,
+            is_travel: true,
+            travel_distance: parseFloat(entry.distance),
+            travel_type: 'car',
+            start_location: entry.startLocation, // Keep full address in the actual data field
+            destination: entry.destination, // Keep full address in the actual data field
+            receipt_url: null, // Mileage doesn't need receipts
+            status: 'pending',
+            category_id: expense.categoryId,
+            subcategory_mapping_id: entry.subcategoryMappingId,
+            license_number: expense.licenseNumber || null,
+            related_employee: null,
+            client_name: null,
+            company_name: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        });
+      } else {
+        // For non-mileage expenses, use the original logic
+        if (categoryName.includes('meal') && !expense.description) {
+          expense.description = 'Meal expense';
+        }
+        
+        const isTravel = categoryName.includes('travel');
+        
+        allExpensesData.push({
+          employee_id: user.value.id,
+          job_number: expense.jobNumber,
+          description: expense.description,
+          amount: parseFloat(expense.amount),
+          gst_amount: parseFloat(expense.gst_amount || '0'),
+          pst_amount: parseFloat(expense.pst_amount || '0'),
+          date: inputDate.value ? inputDate.value.toDate(getLocalTimeZone()) : new Date(),
+          is_travel: isTravel,
+          travel_distance: isTravel && expense.distance ? parseFloat(expense.distance) : null,
+          travel_type: isTravel ? 'public_transport' : null,
+          start_location: expense.startLocation,
+          destination: expense.destination,
+          receipt_url: receiptPaths.value[expense.id] || null,
+          status: 'pending',
+          category_id: expense.categoryId,
+          subcategory_mapping_id: expense.subcategoryMappingId,
+          license_number: expense.licenseNumber || null,
+          related_employee: expense.relatedEmployee || null,
+          client_name: expense.clientName || null,
+          company_name: expense.companyName || null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
       }
-      
-      const isTravel = categoryName.includes('mileage') || categoryName.includes('travel');
-      
-      return {
-        employee_id: user.value.id,
-        job_number: expense.jobNumber || null,
-        description: expense.description,
-        amount: parseFloat(expense.amount),
-        gst_amount: parseFloat(expense.gst_amount || '0'),
-        pst_amount: parseFloat(expense.pst_amount || '0'),
-        date: inputDate.value ? inputDate.value.toDate(getLocalTimeZone()) : new Date(),
-        is_travel: isTravel,
-        travel_distance: isTravel && expense.distance ? parseFloat(expense.distance) : null,
-        travel_type: isTravel ? (categoryName.includes('mileage') ? 'car' : 'public_transport') : null,
-        start_location: expense.startLocation || null,
-        destination: expense.destination || null,
-        receipt_url: receiptPaths.value[expense.id] || null,
-        status: 'pending',
-        category_id: expense.categoryId,
-        subcategory_mapping_id: expense.subcategoryMappingId,
-        license_number: expense.licenseNumber || null,
-        related_employee: expense.relatedEmployee || null,
-        client_name: expense.clientName || null,
-        company_name: expense.companyName || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
     });
     
     // Submit each expense directly
-    for (const expenseData of expensesData) {
+    for (const expenseData of allExpensesData) {
       const { data: expenseResult, error: expenseError } = await client
         .from('claims')
         .insert(expenseData)
@@ -552,7 +629,6 @@ const initGoogleMaps = () => {
 
 // Modified function to setup the Google Places Autocomplete
 const setupAutocomplete = () => {
-  // Use nextTick to ensure DOM is updated before accessing elements
   nextTick(() => {
     try {
       // Find all car mileage expenses
@@ -561,61 +637,63 @@ const setupAutocomplete = () => {
         return category && category.name.toLowerCase().includes('mileage')
       })
       
-      // Initialize autocomplete for each mileage expense
+      // Initialize autocomplete for each mileage expense entry
       mileageExpenses.forEach(expense => {
-        const startInput = document.getElementById(`startLocation-${expense.id}`)
-        const endInput = document.getElementById(`destination-${expense.id}`)
+        if (!expense.mileageEntries) return
         
-        // Only proceed if both inputs exist for this expense
-        if (!startInput || !endInput) {
-          return
-        }
-        
-        // Initialize start location autocomplete
-        if (!startInput.getAttribute('data-autocomplete-initialized')) {
-          const options = {
-            types: ['address'],
-            componentRestrictions: { country: 'ca' }
+        expense.mileageEntries.forEach((entry, entryIndex) => {
+          const startInput = document.getElementById(`startLocation-${expense.id}-${entryIndex}`)
+          const endInput = document.getElementById(`destination-${expense.id}-${entryIndex}`)
+          
+          // Only proceed if both inputs exist for this entry
+          if (!startInput || !endInput) return
+          
+          // Initialize start location autocomplete
+          if (!startInput.getAttribute('data-autocomplete-initialized')) {
+            const options = {
+              types: ['address'],
+              componentRestrictions: { country: 'ca' }
+            }
+            
+            const autoStart = new window.google.maps.places.Autocomplete(startInput, options)
+            startInput.setAttribute('data-autocomplete-initialized', 'true')
+            
+            autoStart.addListener('place_changed', () => {
+              const place = autoStart.getPlace()
+              if (place && place.formatted_address) {
+                // Update this specific entry's startLocation
+                const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
+                if (expenseIndex !== -1 && expenses.value[expenseIndex].mileageEntries) {
+                  expenses.value[expenseIndex].mileageEntries[entryIndex].startLocation = place.formatted_address
+                }
+                calculateDistanceForEntry(expense.id, entryIndex)
+              }
+            })
           }
           
-          const autoStart = new window.google.maps.places.Autocomplete(startInput, options)
-          startInput.setAttribute('data-autocomplete-initialized', 'true')
-          
-          autoStart.addListener('place_changed', () => {
-            const place = autoStart.getPlace()
-            if (place && place.formatted_address) {
-              // Update this specific expense's startLocation
-              const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
-              if (expenseIndex !== -1) {
-                expenses.value[expenseIndex].startLocation = place.formatted_address
-              }
-              calculateDistanceForExpense(expense.id)
+          // Initialize destination autocomplete
+          if (!endInput.getAttribute('data-autocomplete-initialized')) {
+            const options = {
+              types: ['address'],
+              componentRestrictions: { country: 'ca' }
             }
-          })
-        }
-        
-        // Initialize destination autocomplete
-        if (!endInput.getAttribute('data-autocomplete-initialized')) {
-          const options = {
-            types: ['address'],
-            componentRestrictions: { country: 'ca' }
+            
+            const autoEnd = new window.google.maps.places.Autocomplete(endInput, options)
+            endInput.setAttribute('data-autocomplete-initialized', 'true')
+            
+            autoEnd.addListener('place_changed', () => {
+              const place = autoEnd.getPlace()
+              if (place && place.formatted_address) {
+                // Update this specific entry's destination
+                const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
+                if (expenseIndex !== -1 && expenses.value[expenseIndex].mileageEntries) {
+                  expenses.value[expenseIndex].mileageEntries[entryIndex].destination = place.formatted_address
+                }
+                calculateDistanceForEntry(expense.id, entryIndex)
+              }
+            })
           }
-          
-          const autoEnd = new window.google.maps.places.Autocomplete(endInput, options)
-          endInput.setAttribute('data-autocomplete-initialized', 'true')
-          
-          autoEnd.addListener('place_changed', () => {
-            const place = autoEnd.getPlace()
-            if (place && place.formatted_address) {
-              // Update this specific expense's destination
-              const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
-              if (expenseIndex !== -1) {
-                expenses.value[expenseIndex].destination = place.formatted_address
-              }
-              calculateDistanceForExpense(expense.id)
-            }
-          })
-        }
+        })
       })
     } catch (error) {
       console.error("Error setting up autocomplete:", error)
@@ -623,22 +701,21 @@ const setupAutocomplete = () => {
   })
 }
 
-// New function to calculate distance for a specific expense
-const calculateDistanceForExpense = (expenseId) => {
-  const startInput = document.getElementById(`startLocation-${expenseId}`)
-  const endInput = document.getElementById(`destination-${expenseId}`)
+// New function to calculate distance for a specific mileage entry
+const calculateDistanceForEntry = (expenseId, entryIndex) => {
+  if (!distanceMatrixService) return
   
-  if (!startInput || !endInput || !distanceMatrixService) return
-  
-  // Get the expense
+  // Get the expense and entry
   const expense = expenses.value.find(e => e.id === expenseId)
-  if (!expense) return
+  if (!expense || !expense.mileageEntries || !expense.mileageEntries[entryIndex]) return
+  
+  const entry = expense.mileageEntries[entryIndex]
   
   // Only calculate if both addresses have values
-  if (expense.startLocation && expense.destination) {
+  if (entry.startLocation && entry.destination) {
     const request = {
-      origins: [expense.startLocation],
-      destinations: [expense.destination],
+      origins: [entry.startLocation],
+      destinations: [entry.destination],
       travelMode: 'DRIVING',
       unitSystem: window.google.maps.UnitSystem.METRIC
     }
@@ -651,11 +728,11 @@ const calculateDistanceForExpense = (expenseId) => {
           const distanceInMeters = results.distance.value
           const distanceInKm = distanceInMeters / 1000
           
-          // Update the distance field and amount for this specific expense
+          // Update the distance field for this specific entry
           const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-          if (expenseIndex !== -1) {
-            expenses.value[expenseIndex].distance = distanceInKm.toFixed(2)
-            updateMileageAmount(expenseId)
+          if (expenseIndex !== -1 && expenses.value[expenseIndex].mileageEntries) {
+            expenses.value[expenseIndex].mileageEntries[entryIndex].distance = distanceInKm.toFixed(2)
+            updateMileageTotals(expenseId)
           }
         }
       }
@@ -751,6 +828,99 @@ const df = new DateFormatter('en-US', {
 })
 
 const inputDate = ref<DateValue>()
+
+// Add a function to add mileage entry
+const addMileageEntry = (expenseId: number) => {
+  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+  if (expenseIndex === -1) return
+  
+  // Initialize array if it doesn't exist
+  if (!expenses.value[expenseIndex].mileageEntries) {
+    expenses.value[expenseIndex].mileageEntries = []
+  }
+  
+  // Add new entry with today's date and copy the subcategory from previous entry if available
+  const previousSubcategoryId = expenses.value[expenseIndex].mileageEntries.length > 0 
+    ? expenses.value[expenseIndex].mileageEntries[expenses.value[expenseIndex].mileageEntries.length - 1].subcategoryMappingId 
+    : '';
+  
+  // Use a deep-copy of today's date to ensure each entry has its own date object
+  const today = new Date();
+  
+  expenses.value[expenseIndex].mileageEntries.push({
+    jobNumber: '',
+    startLocation: '',
+    destination: '',
+    distance: '',
+    date: today,
+    datePopoverOpen: false,
+    subcategoryMappingId: previousSubcategoryId // Copy from previous entry
+  })
+  
+  // Setup autocomplete for new fields
+  nextTick(() => {
+    setupAutocomplete()
+  })
+}
+
+// Add a function to remove mileage entry
+const removeMileageEntry = (expenseId: number, entryIndex: number) => {
+  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+  if (expenseIndex === -1) return
+  
+  // Only remove if there's more than one
+  if (expenses.value[expenseIndex].mileageEntries.length > 1) {
+    expenses.value[expenseIndex].mileageEntries.splice(entryIndex, 1)
+    updateMileageTotals(expenseId)
+  }
+}
+
+// Add function to calculate total distance
+const calculateTotalDistance = (expenseId: number) => {
+  const expense = expenses.value.find(e => e.id === expenseId)
+  if (!expense || !expense.mileageEntries) return '0'
+  
+  const total = expense.mileageEntries.reduce((sum, entry) => {
+    return sum + (parseFloat(entry.distance) || 0)
+  }, 0)
+  
+  return total.toFixed(2)
+}
+
+// Update the mileage totals and calculate amount
+const updateMileageTotals = (expenseId: number) => {
+  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+  if (expenseIndex === -1) return
+  
+  const totalDistance = calculateTotalDistance(expenseId)
+  expenses.value[expenseIndex].distance = totalDistance
+  expenses.value[expenseIndex].amount = (parseFloat(totalDistance) * MILEAGE_RATE).toFixed(2)
+}
+
+// Add string date handling for simpler input
+const updateEntryDateFromString = (expenseId: number, entryIndex: number) => {
+  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+  if (expenseIndex === -1 || !expenses.value[expenseIndex].mileageEntries) return
+  
+  const entry = expenses.value[expenseIndex].mileageEntries[entryIndex]
+  if (entry.dateString) {
+    entry.date = new Date(entry.dateString)
+  }
+}
+
+// Helper function to check if job number should be shown for a subcategory
+const shouldShowJobNumber = (subcategoryMappingId: string) => {
+  if (!subcategoryMappingId) return false
+  
+  const subcategory = dbSubcategories.value.find(sc => sc.mapping_id === subcategoryMappingId)
+  if (!subcategory) return false
+  
+  // Check if subcategory name contains jobsite or tender
+  const subcategoryName = subcategory.name.toLowerCase()
+  return subcategoryName.includes('jobsite') || 
+         subcategoryName.includes('tender') || 
+         subcategory.requires_job_number === true
+}
 
 </script>
 
@@ -862,8 +1032,8 @@ const inputDate = ref<DateValue>()
                     </Select>
                   </div>
                   
-                  <!-- Subcategory selection - always visible -->
-                  <div class="space-y-2">
+                  <!-- Subcategory selection - hide for mileage categories -->
+                  <div class="space-y-2" v-if="!expense.categoryId || !dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')">
                     <Label for="subcategory" class="flex items-center">
                       Subcategory <span class="text-red-500 ml-1">*</span>
                     </Label>
@@ -925,8 +1095,8 @@ const inputDate = ref<DateValue>()
                 </div>
               </div>
               
-              <!-- Date field -->
-              <div class="space-y-2">
+              <!-- Date field - hide for mileage expenses since we have per-entry dates -->
+              <div v-if="!expense.categoryId || !dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2">
                 <Label for="date" class="flex items-center">
                   Date of Expense <span class="text-red-500 ml-1">*</span>
                 </Label>
@@ -1044,67 +1214,168 @@ const inputDate = ref<DateValue>()
               <!-- Car Mileage specific fields - responsive layout -->
               <div v-if="expense.categoryId && dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
                 <div class="grid grid-cols-1 gap-4">
-                  <!-- Address fields in one row on larger screens -->
-                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <!-- Start Location with Google Autocomplete -->
-                    <div class="space-y-2">
-                      <Label for="startLocation" class="flex items-center">
-                        Start Address <span class="text-red-500 ml-1">*</span>
-                      </Label>
-                      <Input 
-                        :id="`startLocation-${expense.id}`" 
-                        v-model="expense.startLocation" 
-                        placeholder="Enter Start Address" 
-                        autocomplete="off"
-                        required
-                      />
-                    </div>
-                    
-                    <!-- Destination with Google Autocomplete -->
-                    <div class="space-y-2">
-                      <Label for="destination" class="flex items-center">
-                        Destination Address <span class="text-red-500 ml-1">*</span>
-                      </Label>
-                      <Input 
-                        :id="`destination-${expense.id}`" 
-                        v-model="expense.destination" 
-                        placeholder="Enter Destination Address" 
-                        autocomplete="off"
-                        required
-                      />
-                    </div>
-                    
-                    <!-- Total Distance -->
-                    <div class="space-y-2">
-                      <Label for="distance" class="flex items-center">
-                        Total Distance (km) <span class="text-red-500 ml-1">*</span>
-                      </Label>
-                      <Input 
-                        id="distance" 
-                        type="number" 
-                        v-model="expense.distance" 
-                        placeholder="0" 
-                        @input="updateMileageAmount(expense.id)"
-                        readonly
-                        required
-                      />
-                      <p class="text-xs text-green-600">Auto-calculated from addresses (from Google Maps)</p>
+                  <!-- Multiple entries for mileage - inline on desktop, stacked on mobile -->
+                  <div v-for="(entry, entryIndex) in expense.mileageEntries || [{}]" :key="entryIndex">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+                      <!-- Date picker for each entry -->
+                      <div class="md:col-span-2">
+                        <Label class="md:hidden">Date <span class="text-red-500">*</span></Label>
+                        <Popover v-model:open="entry.datePopoverOpen">
+                          <PopoverTrigger as-child>
+                            <Button
+                              variant="outline"
+                              class="w-full justify-start text-left font-normal text-xs md:text-sm"
+                              :class="cn(
+                                !entry.date && 'text-muted-foreground'
+                              )"
+                            >
+                              <CalendarIcon class="mr-2 h-3 w-3 md:h-4 md:w-4" />
+                              {{ entry.date ? df.format(entry.date) : "Pick a date" }}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent class="w-auto p-0">
+                            <Calendar 
+                              v-model="entry.dateValue"
+                              initial-focus 
+                              @update:model-value="() => {
+                                entry.date = entry.dateValue?.toDate(getLocalTimeZone());
+                                entry.datePopoverOpen = false;
+                              }"
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      
+                      <!-- Subcategory for each entry -->
+                      <div class="md:col-span-2">
+                        <Label class="md:hidden">Subcategory <span class="text-red-500">*</span></Label>
+                        <Select 
+                          v-model="entry.subcategoryMappingId" 
+                          required
+                        >
+                          <SelectTrigger class="w-full">
+                            <SelectValue placeholder="Subcategory" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem 
+                              v-for="subcategory in getSubcategories(expense.id)" 
+                              :key="subcategory.id" 
+                              :value="subcategory.mapping_id"
+                            >
+                              {{ subcategory.name }}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <!-- Job Number - only visible for jobsite and tender subcategories -->
+                      <transition name="slide">
+                        <div class="md:col-span-2" v-if="shouldShowJobNumber(entry.subcategoryMappingId)">
+                          <Label class="md:hidden">Job Number <span class="text-red-500">*</span></Label>
+                          <Input 
+                            :id="`jobNumber-${expense.id}-${entryIndex}`" 
+                            v-model="entry.jobNumber" 
+                            placeholder="Job #" 
+                            required
+                          />
+                        </div>
+                      </transition>
+                      
+                      <!-- Start Location -->
+                      <div class="md:col-span-2" :class="{'md:col-span-4': !shouldShowJobNumber(entry.subcategoryMappingId)}">
+                        <Label class="md:hidden">Start Address <span class="text-red-500">*</span></Label>
+                        <Input 
+                          :id="`startLocation-${expense.id}-${entryIndex}`" 
+                          v-model="entry.startLocation" 
+                          placeholder="Start address" 
+                          autocomplete="off"
+                          required
+                        />
+                      </div>
+                      
+                      <!-- Destination -->
+                      <div class="md:col-span-2">
+                        <Label class="md:hidden">Destination <span class="text-red-500">*</span></Label>
+                        <Input 
+                          :id="`destination-${expense.id}-${entryIndex}`" 
+                          v-model="entry.destination" 
+                          placeholder="Destination" 
+                          autocomplete="off"
+                          required
+                        />
+                      </div>
+                      
+                      <!-- Distance -->
+                      <div class="md:col-span-1">
+                        <Label class="md:hidden">Distance (km) <span class="text-red-500">*</span></Label>
+                        <Input 
+                          :id="`distance-${expense.id}-${entryIndex}`" 
+                          type="number" 
+                          v-model="entry.distance" 
+                          placeholder="0" 
+                          readonly
+                          required
+                          class="bg-gray-100"
+                        />
+                      </div>
+
+                      <!-- Action buttons -->
+                      <div class="md:col-span-1 flex items-center justify-end md:justify-center">
+                        <Button 
+                          v-if="expense.mileageEntries && expense.mileageEntries.length > 1" 
+                          variant="destructive" 
+                          size="icon"
+                          @click="removeMileageEntry(expense.id, entryIndex)" 
+                          type="button"
+                          class="h-8 w-8"
+                        >
+                          <Trash2 class="h-4 w-4" />
+                        </Button>
+                        
+                        <!-- Plus button for the last entry -->
+                        <Button 
+                          v-if="expense.mileageEntries && entryIndex === expense.mileageEntries.length - 1"
+                          type="button" 
+                          variant="outline" 
+                          size="icon"
+                          @click="addMileageEntry(expense.id)"
+                          class="h-8 w-8 ml-2 bg-[#f05a1d] text-white hover:bg-[#f05a1d]/80 hover:text-white"
+                        >
+                          <Plus class="h-4 w-" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
 
-                  <!-- Calculated Amount (read-only) -->
-                  <div class="space-y-2 md:w-1/3">
-                    <Label for="calculated-amount" class="flex items-center">
-                      Amount ($) <span class="text-red-500 ml-1">*</span>
-                    </Label>
-                    <Input 
-                      id="calculated-amount" 
-                      type="text" 
-                      :value="expense.amount" 
-                      readonly
-                      class="bg-gray-100"
-                    />
-                    <p class="text-xs text-gray-500">Based on $0.61/km</p>
+                  <!-- Total Distance and Amount -->
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 p-4 bg-gray-50 rounded-md">
+                    <div class="space-y-2">
+                      <Label for="totalDistance" class="flex items-center font-semibold">
+                        Total Distance (km)
+                      </Label>
+                      <Input 
+                        :id="`totalDistance-${expense.id}`" 
+                        type="text" 
+                        :value="calculateTotalDistance(expense.id)" 
+                        readonly
+                        class="bg-gray-100 font-bold"
+                      />
+                    </div>
+
+                    <!-- Calculated Amount (read-only) -->
+                    <div class="space-y-2">
+                      <Label for="calculated-amount" class="flex items-center font-semibold">
+                        Total Amount ($)
+                      </Label>
+                      <Input 
+                        id="calculated-amount" 
+                        type="text" 
+                        :value="expense.amount" 
+                        readonly
+                        class="bg-gray-100 font-bold"
+                      />
+                      <p class="text-xs text-gray-500">Based on $0.61/km</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1262,3 +1533,19 @@ const inputDate = ref<DateValue>()
     </div>
   </div>
 </template>
+
+<style>
+/* Add these transition styles to the existing style section or create it if not present */
+.slide-enter-active,
+.slide-leave-active {
+  transition: all 0.3s ease;
+  max-height: 60px;
+  overflow: hidden;
+}
+.slide-enter-from,
+.slide-leave-to {
+  opacity: 0;
+  max-height: 0;
+  transform: translateY(-10px);
+}
+</style>

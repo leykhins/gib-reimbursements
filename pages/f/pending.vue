@@ -545,8 +545,8 @@ const confirmRejection = async () => {
       .from('claims')
       .update({
         status: 'rejected',
-        admin_verified_by: user.value.id,
-        admin_verified_at: new Date().toISOString(),
+        manager_approved_by: user.value.id,
+        manager_approved_at: new Date().toISOString(),
         rejection_reason: rejectionReason.value
       })
       .eq('id', rejectingRequestId.value)
@@ -560,6 +560,19 @@ const confirmRejection = async () => {
       variant: 'default'
     })
     
+    // Send email notification
+    try {
+      const { sendClaimRejectionEmail } = await import('~/lib/notifications')
+      await sendClaimRejectionEmail(
+        rejectingRequestId.value,
+        user.value.id,
+        rejectionReason.value
+      )
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError)
+      // Continue even if email fails - the claim is still rejected
+    }
+    
     showRejectModal.value = false
     
     // Refresh the list
@@ -572,6 +585,17 @@ const confirmRejection = async () => {
       variant: 'destructive'
     })
   }
+}
+
+// Add this function after the toggleJob function
+const hasEmployeeSelectedRequests = (employeeId) => {
+  const employee = organizedData.value[employeeId]
+  
+  return Object.values(employee.categories).some(category => 
+    Object.values(category.jobGroups).some(jobGroup => 
+      jobGroup.requests.some(request => selectedRequests.value.has(request.id))
+    )
+  )
 }
 
 // Initialize
@@ -749,7 +773,7 @@ onMounted(async () => {
                 Total: {{ formatCurrency(organizedData[employeeId].total) }}
               </div>
               <Button 
-                v-if="selectedRequests.size > 0"
+                v-if="hasEmployeeSelectedRequests(employeeId)"
                 @click.stop="verifySelectedRequests(null)"
                 class="bg-green-600 hover:bg-green-700 text-white"
                 size="sm"
