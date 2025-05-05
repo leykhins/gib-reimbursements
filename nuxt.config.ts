@@ -29,12 +29,14 @@ export default defineNuxtConfig({
   runtimeConfig: {
     resendApiKey: process.env.RESEND_API_KEY,
     emailFrom: process.env.EMAIL_FROM,
-    
+    supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY,
+
     // Public (available on client)
     public: {
       supabaseUrl: process.env.SUPABASE_URL,
       supabaseKey: process.env.SUPABASE_KEY,
-      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY
+      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
+      siteUrl: process.env.SITE_URL
     }
   },
   supabase: {
@@ -43,7 +45,7 @@ export default defineNuxtConfig({
     redirectOptions: {
       login: '/login',
       callback: '/confirm',
-      exclude: ['/public/*', '/reset_password', '/request_password_reset'],
+      exclude: ['/public/*', '/reset_password', '/request_password_reset', '/signup'],
     }
   }
 })

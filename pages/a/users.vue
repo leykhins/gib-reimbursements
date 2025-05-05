@@ -11,7 +11,12 @@ import {
   PenLine,
   Trash2,
   Key,
-  UserPlus
+  UserPlus,
+  Plus,
+  Loader2,
+  CheckCircle,
+  AlertCircle,
+  XIcon
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -41,6 +46,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { toast } from '@/components/ui/toast'
+import { Label } from '@/components/ui/label'
+import {
+  Alert,
+  AlertTitle,
+  AlertDescription
+} from '@/components/ui/alert'
 
 const client = useSupabaseClient()
 const user = useSupabaseUser()
@@ -80,6 +91,19 @@ const showDepartmentManagerDialog = ref(false)
 const departmentManagerForm = ref({
   department: ''
 })
+
+// State for user invites
+const showInviteDialog = ref(false)
+const inviteEmails = ref([{ 
+  email: '', 
+  first_name: '', 
+  last_name: '', 
+  department: '' 
+}])
+const inviteLoading = ref(false)
+const inviteLoadingMessage = ref('')
+const inviteSuccessMessage = ref('')
+const inviteErrorMessage = ref('')
 
 // Admin navigation items
 const adminNavItems = [
@@ -282,11 +306,73 @@ const openAddUserDialog = () => {
 
 // Add new user
 const addNewUser = async () => {
+  if (!newUserForm.value.email) {
+    toast({
+      title: 'Error',
+      description: 'Email is required',
+      variant: 'destructive'
+    })
+    return
+  }
+  
   try {
-    // This would require admin functions in Supabase or a server endpoint
+    loading.value = true
+    
+    // Generate a random password for initial setup
+    const tempPassword = Math.random().toString(36).slice(-10)
+    
+    // Create user in Supabase Auth
+    const { data, error: authError } = await client.auth.admin.createUser({
+      email: newUserForm.value.email,
+      password: newUserForm.value.password || tempPassword,
+      email_confirm: true, // Mark email as confirmed
+      user_metadata: {
+        first_name: newUserForm.value.first_name,
+        last_name: newUserForm.value.last_name
+      }
+    })
+    
+    if (authError) {
+      // If admin API fails (might not be available), use invite link method
+      // Send invitation email with a link to sign up
+      const { error: inviteError } = await client.auth.admin.inviteUserByEmail(newUserForm.value.email, {
+        redirectTo: `${window.location.origin}/signup`
+      })
+      
+      if (inviteError) throw inviteError
+      
+      // Insert user record in users table
+      const { error: insertError } = await client
+        .from('users')
+        .insert({
+          email: newUserForm.value.email,
+          first_name: newUserForm.value.first_name,
+          last_name: newUserForm.value.last_name,
+          role: newUserForm.value.role
+        })
+      
+      if (insertError) throw insertError
+    } else {
+      // User created successfully with admin API
+      const userId = data.user.id
+      
+      // Insert user record in users table
+      const { error: insertError } = await client
+        .from('users')
+        .insert({
+          id: userId,
+          email: newUserForm.value.email,
+          first_name: newUserForm.value.first_name,
+          last_name: newUserForm.value.last_name,
+          role: newUserForm.value.role
+        })
+      
+      if (insertError) throw insertError
+    }
+    
     toast({
       title: 'Success',
-      description: 'New user added successfully',
+      description: 'User invitation sent successfully',
       variant: 'default'
     })
     
@@ -296,9 +382,11 @@ const addNewUser = async () => {
     console.error('Error adding user:', error)
     toast({
       title: 'Error',
-      description: 'Failed to add user',
+      description: `Failed to add user: ${error.message}`,
       variant: 'destructive'
     })
+  } finally {
+    loading.value = false
   }
 }
 
@@ -398,6 +486,103 @@ const assignDepartment = async () => {
   }
 }
 
+// Open invite users dialog
+const openInviteDialog = () => {
+  inviteEmails.value = [{ 
+    email: '', 
+    first_name: '', 
+    last_name: '', 
+    department: '' 
+  }]
+  showInviteDialog.value = true
+}
+
+// Add another email field
+const addEmailField = () => {
+  inviteEmails.value.push({ 
+    email: '', 
+    first_name: '', 
+    last_name: '', 
+    department: '' 
+  })
+}
+
+// Remove email field
+const removeEmailField = (index) => {
+  if (inviteEmails.value.length > 1) {
+    inviteEmails.value.splice(index, 1)
+  }
+}
+
+// Send invitations to multiple users
+const sendInvitations = async () => {
+  // Clear previous messages
+  inviteSuccessMessage.value = ''
+  inviteErrorMessage.value = ''
+  
+  // Validate emails only - first name and last name will be provided by users during signup
+  const invalidEntries = inviteEmails.value.filter(entry => 
+    !entry.email || !entry.email.includes('@')
+  )
+  
+  if (invalidEntries.length > 0) {
+    inviteErrorMessage.value = 'Please provide valid email for all users'
+    return
+  }
+  
+  inviteLoading.value = true
+  
+  try {
+    // Send invitation emails through the server API
+    inviteLoadingMessage.value = 'Sending invitation emails...'
+    
+    const { data, error } = await useFetch('/api/admin/invite-users', {
+      method: 'POST',
+      body: {
+        users: inviteEmails.value.map(entry => ({ email: entry.email }))
+      }
+    })
+    
+    if (error.value) {
+      throw new Error(error.value.message || 'Failed to send invitations')
+    }
+    
+    const response = data.value
+    
+    if (!response.success) {
+      throw new Error('Failed to send invitations')
+    }
+    
+    // Calculate success statistics
+    const successCount = response.results.filter(r => r.success).length
+    
+    // Set success message
+    if (successCount === inviteEmails.value.length) {
+      inviteSuccessMessage.value = `Successfully invited ${successCount} users!`
+    } else if (successCount > 0) {
+      inviteSuccessMessage.value = `Invited ${successCount} of ${inviteEmails.value.length} users.`
+      
+      // If there were any failures, include details
+      const failedEntries = response.results
+        .filter(r => !r.success)
+        .map(r => `${r.email} (${r.error || 'Unknown error'})`)
+        .join('; ')
+      
+      if (failedEntries) {
+        inviteErrorMessage.value = `Issues: ${failedEntries}`
+      }
+    } else {
+      throw new Error('Failed to send any invitations')
+    }
+  } catch (error) {
+    console.error('Error processing invitations:', error)
+    inviteErrorMessage.value = `Error: ${error.message}`
+  } finally {
+    inviteLoading.value = false
+    inviteLoadingMessage.value = ''
+  }
+}
+
 // Initialize component
 onMounted(async () => {
   await checkAdminStatus()
@@ -428,10 +613,16 @@ definePageMeta({
               class="pl-8"
             />
           </div>
-          <Button @click="openAddUserDialog">
-            <UserPlus class="mr-2 h-4 w-4" />
-            Add User
-          </Button>
+          <div class="flex gap-2">
+            <Button @click="openInviteDialog" variant="default">
+              <UserPlus class="mr-2 h-4 w-4" />
+              Invite Users
+            </Button>
+            <Button @click="openAddUserDialog" variant="outline">
+              <UserPlus class="mr-2 h-4 w-4" />
+              Add User
+            </Button>
+          </div>
         </div>
         
         <div class="rounded-md border">
@@ -521,10 +712,12 @@ definePageMeta({
               <SelectValue placeholder="Select role" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="employee">Employee</SelectItem>
-              <SelectItem value="admin">Admin</SelectItem>
-              <SelectItem value="manager">Manager</SelectItem>
-              <SelectItem value="accounting">Accounting</SelectItem>
+              <SelectItem value="Leadership">Leadership</SelectItem>
+              <SelectItem value="Admin/HR">Admin/HR</SelectItem>
+              <SelectItem value="Operations">Operations</SelectItem>
+              <SelectItem value="Project Management">Project Management</SelectItem>
+              <SelectItem value="Sales/Marketing">Sales/Marketing</SelectItem>
+              <SelectItem value="Finance">Finance</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -595,10 +788,12 @@ definePageMeta({
               <SelectValue placeholder="Select role" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="employee">Employee</SelectItem>
-              <SelectItem value="admin">Admin</SelectItem>
-              <SelectItem value="manager">Manager</SelectItem>
-              <SelectItem value="accounting">Accounting</SelectItem>
+              <SelectItem value="Leadership">Leadership</SelectItem>
+              <SelectItem value="Admin/HR">Admin/HR</SelectItem>
+              <SelectItem value="Operations">Operations</SelectItem>
+              <SelectItem value="Project Management">Project Management</SelectItem>
+              <SelectItem value="Sales/Marketing">Sales/Marketing</SelectItem>
+              <SelectItem value="Finance">Finance</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -642,6 +837,75 @@ definePageMeta({
       <DialogFooter>
         <Button variant="outline" @click="showDepartmentManagerDialog = false">Cancel</Button>
         <Button @click="assignDepartment">Assign</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <!-- Invite Users Dialog -->
+  <Dialog v-model:open="showInviteDialog">
+    <DialogContent class="max-w-4xl">
+      <DialogHeader>
+        <DialogTitle>Invite Users</DialogTitle>
+        <DialogDescription>
+          Send email invitations to users to join the system. Users will provide their names during signup.
+        </DialogDescription>
+      </DialogHeader>
+      
+      <!-- Success message -->
+      <Alert v-if="inviteSuccessMessage" variant="default" class="mt-2">
+        <CheckCircle class="h-4 w-4" />
+        <AlertTitle>Success</AlertTitle>
+        <AlertDescription>{{ inviteSuccessMessage }}</AlertDescription>
+      </Alert>
+      
+      <!-- Error message -->
+      <Alert v-if="inviteErrorMessage" variant="destructive" class="mt-2">
+        <AlertCircle class="h-4 w-4" />
+        <AlertTitle>Error</AlertTitle>
+        <AlertDescription>{{ inviteErrorMessage }}</AlertDescription>
+      </Alert>
+      
+      <div class="py-4">
+        <div class="grid grid-cols-[3fr,1fr] gap-2 mb-2 font-semibold text-sm">
+          <div>Email</div>
+          <div></div>
+        </div>
+        <div v-for="(entry, index) in inviteEmails" :key="index" 
+            class="grid grid-cols-[3fr,1fr] gap-2 mb-2 items-center">
+          <div>
+            <Input v-model="entry.email" type="email" placeholder="user@example.com" required />
+          </div>
+          <div>
+            <Button v-if="inviteEmails.length > 1" 
+                    @click="removeEmailField(index)" 
+                    variant="ghost" 
+                    size="icon"
+                    class="h-8 w-8">
+              <XIcon class="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="flex space-x-2 mb-4">
+        <Button @click="addEmailField" variant="outline" size="sm">
+          <Plus class="h-4 w-4 mr-1" />
+          Add Another Email
+        </Button>
+      </div>
+      
+      <div v-if="inviteLoading" class="mb-4">
+        <div class="flex items-center space-x-2">
+          <Loader2 class="h-5 w-5 animate-spin" />
+          <span>{{ inviteLoadingMessage || 'Processing invitations...' }}</span>
+        </div>
+      </div>
+      
+      <DialogFooter>
+        <Button @click="showInviteDialog = false" variant="outline">Cancel</Button>
+        <Button @click="sendInvitations" :disabled="inviteLoading">
+          Send Invitations
+        </Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>
