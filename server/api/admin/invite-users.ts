@@ -39,12 +39,31 @@ export default defineEventHandler(async (event) => {
             return { email, success: false, error: 'Invalid email' }
           }
           
-          // Generate signup URL with pre-filled email
-          const redirectTo = new URL(`${config.public.siteUrl || 'http://localhost:3000'}/signup`);
+          // Get the site URL from headers if not in config
+          let siteUrl = config.public.siteUrl
+          
+          // If siteUrl is not available, construct from request origin
+          if (!siteUrl) {
+            const origin = event.node.req.headers.origin || event.node.req.headers.host
+            if (origin) {
+              // Check if it's already a URL
+              if (!origin.startsWith('http')) {
+                siteUrl = `https://${origin}`
+              } else {
+                siteUrl = origin
+              }
+            } else {
+              // Default fallback
+              siteUrl = 'https://claims.gibraltar.ca'
+            }
+          }
+          
+          // Construct the redirect URL safely as a string
+          const redirectUrl = `${siteUrl}/signup`
           
           // Send invitation email
           const { data, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
-            redirectTo: redirectTo.toString()
+            redirectTo: redirectUrl
           })
           
           if (inviteError) {
@@ -71,10 +90,11 @@ export default defineEventHandler(async (event) => {
             message: 'Invitation sent successfully'
           }
         } catch (error) {
+          console.error('Error inviting user:', error)
           return { 
             email: user.email, 
             success: false, 
-            error: error.message 
+            error: error.message || 'Unknown error during invitation'
           }
         }
       })
