@@ -545,8 +545,8 @@ const confirmRejection = async () => {
       .from('claims')
       .update({
         status: 'rejected',
-        admin_verified_by: user.value.id,
-        admin_verified_at: new Date().toISOString(),
+        manager_approved_by: user.value.id,
+        manager_approved_at: new Date().toISOString(),
         rejection_reason: rejectionReason.value
       })
       .eq('id', rejectingRequestId.value)
@@ -559,6 +559,19 @@ const confirmRejection = async () => {
       description: 'Request has been rejected',
       variant: 'default'
     })
+    
+    // Send email notification
+    try {
+      const { sendClaimRejectionEmail } = await import('~/lib/notifications')
+      await sendClaimRejectionEmail(
+        rejectingRequestId.value,
+        user.value.id,
+        rejectionReason.value
+      )
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError)
+      // Continue even if email fails - the claim is still rejected
+    }
     
     showRejectModal.value = false
     

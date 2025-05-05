@@ -27,6 +27,9 @@ export default defineNuxtConfig({
     }
   },
   runtimeConfig: {
+    resendApiKey: process.env.RESEND_API_KEY,
+    emailFrom: process.env.EMAIL_FROM,
+    
     // Public (available on client)
     public: {
       supabaseUrl: process.env.SUPABASE_URL,

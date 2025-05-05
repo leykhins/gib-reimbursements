@@ -533,6 +533,19 @@ const confirmRejection = async () => {
       variant: 'default'
     })
     
+    // Send email notification
+    try {
+      const { sendClaimRejectionEmail } = await import('~/lib/notifications')
+      await sendClaimRejectionEmail(
+        rejectingRequestId.value,
+        user.value.id,
+        rejectionReason.value
+      )
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError)
+      // Continue even if email fails - the claim is still rejected
+    }
+    
     showRejectModal.value = false
     
     // Refresh the list
