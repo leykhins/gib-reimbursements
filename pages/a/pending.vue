@@ -468,8 +468,18 @@ const verifySelectedRequests = async (requestId) => {
 // Add this new function to handle the actual verification
 const confirmVerification = async () => {
   try {
-    const promises = verifyingRequests.value.map(id => 
-      client
+    const promises = verifyingRequests.value.map(async (id) => {
+      // Get the claim details first
+      const { data: claimData, error: claimError } = await client
+        .from('claims')
+        .select('employee_id, users(department)')
+        .eq('id', id)
+        .single()
+      
+      if (claimError) throw claimError
+      
+      // Update the claim status
+      const { error: updateError } = await client
         .from('claims')
         .update({
           status: 'verified',
@@ -477,7 +487,19 @@ const confirmVerification = async () => {
           admin_verified_at: new Date().toISOString()
         })
         .eq('id', id)
-    )
+      
+      if (updateError) throw updateError
+      
+      // Send notification to manager
+      try {
+        const { getManagerDetails, sendAdminVerificationEmail } = await import('~/lib/notifications')
+        const managerDetails = await getManagerDetails(client, claimData.users.department)
+        await sendAdminVerificationEmail(id, managerDetails.email, managerDetails.name)
+      } catch (emailError) {
+        console.error('Failed to send email notification:', emailError)
+        // Continue even if email fails - the claim is still verified
+      }
+    })
     
     await Promise.all(promises)
     

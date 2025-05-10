@@ -472,8 +472,9 @@ const verifySelectedRequests = async (requestId) => {
 // Update the actual verification function to set status to 'approved' instead of 'verified'
 const confirmVerification = async () => {
   try {
-    const promises = verifyingRequests.value.map(id => 
-      client
+    const promises = verifyingRequests.value.map(async (id) => {
+      // Update the claim status
+      const { error: updateError } = await client
         .from('claims')
         .update({
           status: 'approved',
@@ -481,7 +482,19 @@ const confirmVerification = async () => {
           manager_approved_at: new Date().toISOString()
         })
         .eq('id', id)
-    )
+      
+      if (updateError) throw updateError
+      
+      // Send notification to accountant
+      try {
+        const { getAccountantDetails, sendManagerApprovalEmail } = await import('~/lib/notifications')
+        const accountantDetails = await getAccountantDetails(client)
+        await sendManagerApprovalEmail(id, accountantDetails.email, accountantDetails.name)
+      } catch (emailError) {
+        console.error('Failed to send email notification:', emailError)
+        // Continue even if email fails - the claim is still approved
+      }
+    })
     
     await Promise.all(promises)
     

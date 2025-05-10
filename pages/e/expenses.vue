@@ -413,6 +413,47 @@ const fetchAvailableYears = async () => {
   }
 }
 
+const submitClaim = async (claimData) => {
+  try {
+    // Insert the claim
+    const { data, error } = await client
+      .from('claims')
+      .insert({
+        ...claimData,
+        status: 'pending',
+        employee_id: user.value.id
+      })
+      .select()
+      .single()
+    
+    if (error) throw error
+    
+    // Send notification to all admins
+    try {
+      const { sendClaimSubmissionEmail } = await import('~/lib/notifications')
+      await sendClaimSubmissionEmail(data.id)
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError)
+      // Continue even if email fails - the claim is still submitted
+    }
+    
+    // Show success message and refresh
+    toast({
+      title: 'Success',
+      description: 'Claim submitted successfully',
+      variant: 'default'
+    })
+    await fetchReimbursementRequests()
+  } catch (err) {
+    console.error('Error submitting claim:', err)
+    toast({
+      title: 'Error',
+      description: 'Failed to submit claim',
+      variant: 'destructive'
+    })
+  }
+}
+
 // Initialize
 onMounted(async () => {
   await fetchAvailableYears()

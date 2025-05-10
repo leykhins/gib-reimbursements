@@ -554,7 +554,8 @@ const confirmSubmit = async () => {
       }
     });
     
-    // Submit each expense directly
+    // Submit each expense and collect their IDs
+    const submittedClaimIds = [];
     for (const expenseData of allExpensesData) {
       const { data: expenseResult, error: expenseError } = await client
         .from('claims')
@@ -565,6 +566,17 @@ const confirmSubmit = async () => {
       if (expenseError) {
         throw expenseError
       }
+      
+      submittedClaimIds.push(expenseResult.id)
+    }
+    
+    // Send a single consolidated notification for all claims
+    try {
+      const { sendConsolidatedClaimSubmissionEmail } = await import('~/lib/notifications')
+      await sendConsolidatedClaimSubmissionEmail(submittedClaimIds)
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError)
+      // Continue even if email fails - the claims are still submitted
     }
     
     // Close modal and navigate to dashboard
