@@ -47,5 +47,12 @@ export default defineNuxtConfig({
       callback: '/confirm',
       exclude: ['/public/*', '/reset_password', '/request_password_reset', '/signup'],
     }
+  },
+  nitro: {
+    esbuild: {
+      options: {
+        logLevel: 'warning'
+      }
+    }
   }
 })
