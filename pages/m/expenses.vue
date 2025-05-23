@@ -83,6 +83,11 @@ const showRejectModal = ref(false)
 const rejectingRequestId = ref(null)
 const rejectionReason = ref('')
 
+// Add these new refs for tracking different loading states
+const verifyingRequestIds = ref(new Set())  // For tracking individual request approval
+const isVerifying = ref(false)  // For bulk approval
+const isRejecting = ref(false)  // For rejection process
+
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
   try {
@@ -192,14 +197,14 @@ const fetchReimbursementRequests = async () => {
       .from('claims')
       .select(`
         *,
-        users:employee_id(first_name, last_name, department),
+        users!claims_employee_id_fkey(first_name, last_name, department),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
           subcategory:subcategory_id(id, subcategory_name)
         ),
-        manager_approver:manager_approved_by(first_name, last_name),
-        admin_verifier:admin_verified_by(first_name, last_name)
+        manager_approver:users!claims_manager_approved_by_fkey(first_name, last_name),
+        admin_verifier:users!claims_admin_verified_by_fkey(first_name, last_name)
       `)
       .eq('users.department', managerDepartment)
       .order('date', { ascending: false })
@@ -497,22 +502,24 @@ const isRequestActionable = (request) => {
 }
 
 // Update verify and reject functions to check if request is actionable
-const verifySelectedRequests = async (requestId: string | null) => {
+const verifySelectedRequests = async (requestId) => {
   // If specific request ID, check if actionable
   if (requestId) {
+    verifyingRequestIds.value.add(requestId)
     const request = reimbursementRequests.value.find(r => r.id === requestId)
     if (!request || !isRequestActionable(request)) {
       toast({
         title: 'Error',
-        description: 'This request cannot be verified because it is not admin verified.',
+        description: 'This request cannot be approved because it is not admin verified.',
         variant: 'destructive'
       })
+      verifyingRequestIds.value.delete(requestId)
       return
     }
   }
 
   // For bulk verification, filter selected IDs to only include actionable ones
-  const allSelectedRequests = Array.from(selectedRequests.value)
+  const allSelectedRequests = requestId ? [requestId] : Array.from(selectedRequests.value)
   const actionableRequests = allSelectedRequests.filter(id => {
     const request = reimbursementRequests.value.find(r => r.id === id)
     return request && isRequestActionable(request)
@@ -521,14 +528,20 @@ const verifySelectedRequests = async (requestId: string | null) => {
   if (actionableRequests.length === 0) {
     toast({
       title: 'Error',
-      description: 'None of the selected requests can be verified because they are not admin verified.',
+      description: 'None of the selected requests can be approved because they are not admin verified.',
       variant: 'destructive'
     })
+    if (requestId) {
+      verifyingRequestIds.value.delete(requestId)
+    }
     return
   }
   
   verifyingRequests.value = actionableRequests
   showVerifyModal.value = true
+  if (requestId) {
+    verifyingRequestIds.value.delete(requestId)
+  }
 }
 
 const rejectRequest = async (requestId) => {
@@ -548,9 +561,66 @@ const rejectRequest = async (requestId) => {
   showRejectModal.value = true
 }
 
-// Add this function to handle the actual rejection
+// Update the confirmVerification function
+const confirmVerification = async () => {
+  try {
+    isVerifying.value = true
+    // Add all requests being verified to the tracking set
+    verifyingRequests.value.forEach(id => verifyingRequestIds.value.add(id))
+    
+    const promises = verifyingRequests.value.map(async (id) => {
+      try {
+        const { error: updateError } = await client
+          .from('claims')
+          .update({
+            status: 'approved',
+            manager_approved_by: user.value.id,
+            manager_approved_at: new Date().toISOString()
+          })
+          .eq('id', id)
+        
+        if (updateError) throw updateError
+        
+        // Send notification
+        try {
+          const { sendManagerApprovalEmail } = await import('~/lib/notifications')
+          await sendManagerApprovalEmail(id)
+        } catch (emailError) {
+          console.error('Failed to send email notification:', emailError)
+        }
+      } finally {
+        verifyingRequestIds.value.delete(id)
+      }
+    })
+    
+    await Promise.all(promises)
+    
+    // Show success modal
+    successMessage.value = `Successfully approved ${verifyingRequests.value.length} request${verifyingRequests.value.length > 1 ? 's' : ''}`
+    showSuccessModal.value = true
+    showVerifyModal.value = false
+    
+    // Refresh the list and clear selections
+    selectedRequests.value.clear()
+    await fetchReimbursementRequests()
+  } catch (err) {
+    console.error('Error approving requests:', err)
+    toast({
+      title: 'Error',
+      description: 'Failed to approve some requests',
+      variant: 'destructive'
+    })
+    showVerifyModal.value = false
+  } finally {
+    isVerifying.value = false
+    verifyingRequestIds.value.clear()
+  }
+}
+
+// Update the confirmRejection function
 const confirmRejection = async () => {
   try {
+    isRejecting.value = true
     const { error } = await client
       .from('claims')
       .update({
@@ -566,7 +636,7 @@ const confirmRejection = async () => {
     // Show success message
     toast({
       title: 'Success',
-      description: 'Request rejected successfully',
+      description: 'Request has been rejected',
       variant: 'default'
     })
     
@@ -580,7 +650,6 @@ const confirmRejection = async () => {
       )
     } catch (emailError) {
       console.error('Failed to send email notification:', emailError)
-      // Continue even if email fails - the claim is still rejected
     }
     
     showRejectModal.value = false
@@ -594,41 +663,8 @@ const confirmRejection = async () => {
       description: 'Failed to reject request',
       variant: 'destructive'
     })
-  }
-}
-
-// Add this new function to handle the actual verification
-const confirmVerification = async () => {
-  try {
-    const promises = verifyingRequests.value.map(id => 
-      client
-        .from('claims')
-        .update({
-          status: 'verified',
-          admin_verified_by: user.value.id,
-          admin_verified_at: new Date().toISOString()
-        })
-        .eq('id', id)
-    )
-    
-    await Promise.all(promises)
-    
-    // Show success modal
-    successMessage.value = `Successfully verified ${verifyingRequests.value.length} request${verifyingRequests.value.length > 1 ? 's' : ''}`
-    showSuccessModal.value = true
-    showVerifyModal.value = false
-    
-    // Refresh the list and clear selections
-    selectedRequests.value.clear()
-    await fetchReimbursementRequests()
-  } catch (err) {
-    console.error('Error verifying requests:', err)
-    toast({
-      title: 'Error',
-      description: 'Failed to verify some requests',
-      variant: 'destructive'
-    })
-    showVerifyModal.value = false
+  } finally {
+    isRejecting.value = false
   }
 }
 

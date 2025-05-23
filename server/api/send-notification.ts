@@ -5,7 +5,8 @@ import {
   generateRejectionEmailContent,
   generateClaimSubmissionEmailContent,
   generateAdminVerificationEmailContent,
-  generateManagerApprovalEmailContent
+  generateManagerApprovalEmailContent,
+  generateClaimProcessedEmailContent
 } from '~/lib/notifications'
 
 export default defineEventHandler(async (event) => {
@@ -102,6 +103,14 @@ export default defineEventHandler(async (event) => {
         subject = 'New Reimbursement Claims Submitted'
         break
         
+      case 'processed':
+        emailHtmlContent = generateClaimProcessedEmailContent(
+          recipientName,
+          claimDetails
+        )
+        subject = 'Your Reimbursement Claim Has Been Processed'
+        break
+        
       default:
         throw createError({
           statusCode: 400,
@@ -111,7 +120,7 @@ export default defineEventHandler(async (event) => {
     
     // Send email with sender name
     const { data, error } = await resend.emails.send({
-      from: 'Gibraltar Reimbursement <' + config.emailFrom + '>',
+      from: 'GibClaim <' + config.emailFrom + '>',
       to: recipientEmail,
       subject: subject,
       html: emailHtmlContent,

@@ -85,7 +85,7 @@
           date,
           category_id,
           subcategory_mapping_id,
-          users:employee_id(first_name, last_name, department)
+          users!claims_employee_id_fkey(first_name, last_name, department)
         `)
         .eq('status', 'approved')
         .order('date', { ascending: false })

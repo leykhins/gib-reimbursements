@@ -18,7 +18,7 @@ const closeSidebar = () => {
 useHead({
   title: route.meta.title || 'Employee Dashboard',
   titleTemplate: (title) => {
-    return title ? `${title} - Gibraltar Reimbursements` : 'Gibraltar Reimbursements'
+    return title ? `${title} - GibClaim` : 'GibClaim'
   }
 })
 </script>

@@ -934,6 +934,20 @@ const shouldShowJobNumber = (subcategoryMappingId: string) => {
          subcategory.requires_job_number === true
 }
 
+// Add a computed property to count total claims
+const totalClaimsCount = computed(() => {
+  return expenses.value.reduce((total, expense) => {
+    // If it's a mileage expense with multiple entries, count those entries
+    const category = dbCategories.value.find(c => c.id === expense.categoryId);
+    if (category && category.name.toLowerCase().includes('mileage') && expense.mileageEntries) {
+      // Only count entries that have distance (valid entries)
+      return total + expense.mileageEntries.filter(entry => entry.distance && parseFloat(entry.distance) > 0).length;
+    }
+    // For non-mileage expenses, count as 1
+    return total + 1;
+  }, 0);
+});
+
 </script>
 
 <template>
@@ -1488,7 +1502,7 @@ const shouldShowJobNumber = (subcategoryMappingId: string) => {
             <div class="flex items-center space-x-6">
               <div>
                 <span class="text-sm text-gray-500">Total Claims:</span>
-                <span class="ml-2 font-semibold">{{ expenses.length }}</span>
+                <span class="ml-2 font-semibold">{{ totalClaimsCount }}</span>
               </div>
               <div>
                 <span class="text-sm text-gray-500">Grand Total:</span>
@@ -1508,7 +1522,7 @@ const shouldShowJobNumber = (subcategoryMappingId: string) => {
             <div class="grid grid-cols-2 gap-2 mb-3">
               <div>
                 <span class="text-sm text-gray-500">Claims:</span>
-                <span class="ml-1 font-semibold">{{ expenses.length }}</span>
+                <span class="ml-1 font-semibold">{{ totalClaimsCount }}</span>
               </div>
               <div>
                 <span class="text-sm text-gray-500">Grand Total:</span>
@@ -1533,7 +1547,7 @@ const shouldShowJobNumber = (subcategoryMappingId: string) => {
     <div v-if="showConfirmModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div class="bg-white rounded-lg p-6 max-w-md w-full">
         <h3 class="text-lg font-medium mb-4">Confirm Submission</h3>
-        <p class="mb-6">Are you sure you want to submit {{ expenses.length }} expense{{ expenses.length > 1 ? 's' : '' }}?</p>
+        <p class="mb-6">Are you sure you want to submit {{ totalClaimsCount }} claim{{ totalClaimsCount > 1 ? 's' : '' }}?</p>
         <div class="flex justify-end space-x-2">
           <Button variant="outline" @click="cancelSubmit">Cancel</Button>
           <Button @click="confirmSubmit" :disabled="loading">
