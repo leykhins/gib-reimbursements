@@ -61,7 +61,7 @@ export const generateRejectionEmailContent = (
       <p>You can view the detailed status of your claims on your employee dashboard.</p>
       
       <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-        <p>This is an automated notification from the Gibraltar Construction Reimbursement System.</p>
+        <p>This is an automated notification from the GibClaim System.</p>
       </div>
     </div>
   `
@@ -90,7 +90,7 @@ export const getClaimDetailsForEmail = async (
         id,
         claim_subcategories:subcategory_id(subcategory_name)
       ),
-      users:employee_id(first_name, last_name, email)
+      users!claims_employee_id_fkey(first_name, last_name, email)
     `)
     .eq('id', claimId)
     .single()
@@ -201,7 +201,7 @@ export const generateClaimSubmissionEmailContent = (
       <p>Please review this claim in the admin dashboard.</p>
       
       <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-        <p>This is an automated notification from the Gibraltar Construction Reimbursement System.</p>
+        <p>This is an automated notification from the GibClaim System.</p>
       </div>
     </div>
   `
@@ -240,7 +240,7 @@ export const generateAdminVerificationEmailContent = (
       <p>Please review and approve this claim in the manager dashboard.</p>
       
       <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-        <p>This is an automated notification from the Gibraltar Construction Reimbursement System.</p>
+        <p>This is an automated notification from the GibClaim System.</p>
       </div>
     </div>
   `
@@ -279,7 +279,7 @@ export const generateManagerApprovalEmailContent = (
       <p>Please process this claim in the accountant dashboard.</p>
       
       <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-        <p>This is an automated notification from the Gibraltar Construction Reimbursement System.</p>
+        <p>This is an automated notification from the GibClaim System.</p>
       </div>
     </div>
   `
@@ -498,7 +498,7 @@ export const sendConsolidatedClaimSubmissionEmail = async (
           <p>Please review these claims in the admin dashboard.</p>
           
           <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-            <p>This is an automated notification from the Gibraltar Construction Reimbursement System.</p>
+            <p>This is an automated notification from the GibClaim System.</p>
           </div>
         </div>
       `
@@ -525,6 +525,66 @@ export const sendConsolidatedClaimSubmissionEmail = async (
     return { success: true }
   } catch (error) {
     console.error('Failed to send consolidated submission email notification:', error)
+    return { success: false, error }
+  }
+}
+
+// Add this new function to generate processed claim email content
+export const generateClaimProcessedEmailContent = (
+  recipientName: string,
+  claimDetails: {
+    date: string,
+    description: string,
+    amount: number,
+    category_name: string,
+    subcategory_name: string,
+    job_number?: string
+  }
+): string => {
+  return `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #16a34a;">Claim Processing Complete</h2>
+      <p>Hello ${recipientName || 'there'},</p>
+      <p>Your reimbursement claim has been processed and approved for payment.</p>
+      
+      <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <h3 style="margin-top: 0;">Claim Details</h3>
+        <p><strong>Date:</strong> ${formatDate(claimDetails.date)}</p>
+        <p><strong>Description:</strong> ${claimDetails.description}</p>
+        <p><strong>Amount:</strong> ${formatCurrency(claimDetails.amount)}</p>
+        <p><strong>Category:</strong> ${claimDetails.category_name} - ${claimDetails.subcategory_name}</p>
+        ${claimDetails.job_number ? `<p><strong>Job Number:</strong> ${claimDetails.job_number}</p>` : ''}
+      </div>
+      
+      <p>The approved amount will be included in your next payroll cycle.</p>
+      
+      <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
+        <p>This is an automated notification from the GibClaim System.</p>
+      </div>
+    </div>
+  `
+}
+
+// Add this new function to send processed claim email
+export const sendClaimProcessedEmail = async (claimId: string) => {
+  try {
+    const client = useSupabaseClient()
+    const { claimData, userData } = await getClaimDetailsForEmail(client, claimId)
+    
+    await $fetch('/api/send-notification', {
+      method: 'POST',
+      body: {
+        recipientEmail: userData.email,
+        recipientName: userData.fullName,
+        claimId: claimId,
+        claimDetails: claimData,
+        notificationType: 'processed'
+      }
+    })
+    
+    return { success: true }
+  } catch (error) {
+    console.error('Failed to send processed email notification:', error)
     return { success: false, error }
   }
 }

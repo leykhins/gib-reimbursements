@@ -80,6 +80,11 @@ const showRejectModal = ref(false)
 const rejectingRequestId = ref(null)
 const rejectionReason = ref('')
 
+// Add these new refs for tracking different loading states
+const verifyingRequestIds = ref(new Set())  // For tracking individual request processing
+const isVerifying = ref(false)  // For bulk processing
+const isRejecting = ref(false)  // For rejection process
+
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
   try {
@@ -460,24 +465,48 @@ const isEmployeeFullySelected = (employeeId) => {
 }
 
 const verifySelectedRequests = async (requestId) => {
+  if (requestId) {
+    verifyingRequestIds.value.add(requestId)
+  }
   const requestsToVerify = requestId ? [requestId] : Array.from(selectedRequests.value)
   verifyingRequests.value = requestsToVerify
   showVerifyModal.value = true
+  if (requestId) {
+    verifyingRequestIds.value.delete(requestId)
+  }
 }
 
-// Add this new function to handle the actual verification
+// Update the confirmVerification function
 const confirmVerification = async () => {
   try {
-    const promises = verifyingRequests.value.map(id => 
-      client
-        .from('claims')
-        .update({
-          status: 'completed',
-          admin_verified_by: user.value.id,
-          admin_verified_at: new Date().toISOString()
-        })
-        .eq('id', id)
-    )
+    isVerifying.value = true
+    // Add all requests being verified to the tracking set
+    verifyingRequests.value.forEach(id => verifyingRequestIds.value.add(id))
+    
+    const promises = verifyingRequests.value.map(async (id) => {
+      try {
+        const { error: updateError } = await client
+          .from('claims')
+          .update({
+            status: 'completed',
+            accounting_processed_by: user.value.id,
+            accounting_processed_at: new Date().toISOString()
+          })
+          .eq('id', id)
+        
+        if (updateError) throw updateError
+        
+        // Send notification
+        try {
+          const { sendClaimProcessedEmail } = await import('~/lib/notifications')
+          await sendClaimProcessedEmail(id)
+        } catch (emailError) {
+          console.error('Failed to send email notification:', emailError)
+        }
+      } finally {
+        verifyingRequestIds.value.delete(id)
+      }
+    })
     
     await Promise.all(promises)
     
@@ -490,13 +519,16 @@ const confirmVerification = async () => {
     selectedRequests.value.clear()
     await fetchReimbursementRequests()
   } catch (err) {
-    console.error('Error verifying requests:', err)
+    console.error('Error processing requests:', err)
     toast({
       title: 'Error',
-      description: 'Failed to verify some requests',
+      description: 'Failed to process some requests',
       variant: 'destructive'
     })
     showVerifyModal.value = false
+  } finally {
+    isVerifying.value = false
+    verifyingRequestIds.value.clear()
   }
 }
 
@@ -544,15 +576,16 @@ const rejectRequest = async (requestId) => {
   showRejectModal.value = true
 }
 
-// Add this function to handle the actual rejection
+// Update the confirmRejection function
 const confirmRejection = async () => {
   try {
+    isRejecting.value = true
     const { error } = await client
       .from('claims')
       .update({
         status: 'rejected',
-        admin_verified_by: user.value.id,
-        admin_verified_at: new Date().toISOString(),
+        accounting_processed_by: user.value.id,
+        accounting_processed_at: new Date().toISOString(),
         rejection_reason: rejectionReason.value
       })
       .eq('id', rejectingRequestId.value)
@@ -576,7 +609,6 @@ const confirmRejection = async () => {
       )
     } catch (emailError) {
       console.error('Failed to send email notification:', emailError)
-      // Continue even if email fails - the claim is still rejected
     }
     
     showRejectModal.value = false
@@ -590,6 +622,8 @@ const confirmRejection = async () => {
       description: 'Failed to reject request',
       variant: 'destructive'
     })
+  } finally {
+    isRejecting.value = false
   }
 }
 

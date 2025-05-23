@@ -81,6 +81,11 @@ const showRejectModal = ref(false)
 const rejectingRequestId = ref(null)
 const rejectionReason = ref('')
 
+// Add these new refs for tracking different loading states
+const verifyingRequestIds = ref(new Set())  // For tracking individual request verification
+const isVerifying = ref(false)  // For bulk verification
+const isRejecting = ref(false)  // For rejection process
+
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
   try {
@@ -152,14 +157,14 @@ const fetchReimbursementRequests = async () => {
       .from('claims')
       .select(`
         *,
-        profiles:employee_id(first_name, last_name, department),
+        profiles:users!claims_employee_id_fkey(first_name, last_name, department),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
           subcategory:subcategory_id(id, subcategory_name)
         ),
-        manager_approver:manager_approved_by(first_name, last_name),
-        admin_verifier:admin_verified_by(first_name, last_name)
+        manager_approver:users!claims_manager_approved_by_fkey(first_name, last_name),
+        admin_verifier:users!claims_admin_verified_by_fkey(first_name, last_name)
       `)
       .order('date', { ascending: false })
     
@@ -454,26 +459,50 @@ const isEmployeeFullySelected = (employeeId) => {
          pendingRequests.every(id => selectedRequests.value.has(id))
 }
 
-// Replace the existing verifySelectedRequests with this updated version
-const verifySelectedRequests = async (requestId: string | null) => {
+// Update the verifySelectedRequests function
+const verifySelectedRequests = async (requestId) => {
+  if (requestId) {
+    verifyingRequestIds.value.add(requestId)
+  }
   const requestsToVerify = requestId ? [requestId] : Array.from(selectedRequests.value)
   verifyingRequests.value = requestsToVerify
   showVerifyModal.value = true
+  if (requestId) {
+    verifyingRequestIds.value.delete(requestId)
+  }
 }
 
-// Add this new function to handle the actual verification
+// Update the confirmVerification function
 const confirmVerification = async () => {
   try {
-    const promises = verifyingRequests.value.map(id => 
-      client
-        .from('claims')
-        .update({
-          status: 'verified',
-          admin_verified_by: user.value.id,
-          admin_verified_at: new Date().toISOString()
-        })
-        .eq('id', id)
-    )
+    isVerifying.value = true
+    // Add all requests being verified to the tracking set
+    verifyingRequests.value.forEach(id => verifyingRequestIds.value.add(id))
+    
+    const promises = verifyingRequests.value.map(async (id) => {
+      try {
+        const { error: updateError } = await client
+          .from('claims')
+          .update({
+            status: 'verified',
+            admin_verified_by: user.value.id,
+            admin_verified_at: new Date().toISOString()
+          })
+          .eq('id', id)
+        
+        if (updateError) throw updateError
+        
+        // Send notification
+        try {
+          const { sendAdminVerificationEmail } = await import('~/lib/notifications')
+          await sendAdminVerificationEmail(id)
+        } catch (emailError) {
+          console.error('Failed to send email notification:', emailError)
+        }
+      } finally {
+        verifyingRequestIds.value.delete(id)
+      }
+    })
     
     await Promise.all(promises)
     
@@ -493,6 +522,9 @@ const confirmVerification = async () => {
       variant: 'destructive'
     })
     showVerifyModal.value = false
+  } finally {
+    isVerifying.value = false
+    verifyingRequestIds.value.clear()
   }
 }
 
@@ -538,9 +570,10 @@ const rejectRequest = async (requestId) => {
   showRejectModal.value = true
 }
 
-// Add this function to handle the actual rejection
+// Update the confirmRejection function
 const confirmRejection = async () => {
   try {
+    isRejecting.value = true
     const { error } = await client
       .from('claims')
       .update({
@@ -560,6 +593,18 @@ const confirmRejection = async () => {
       variant: 'default'
     })
     
+    // Send email notification
+    try {
+      const { sendClaimRejectionEmail } = await import('~/lib/notifications')
+      await sendClaimRejectionEmail(
+        rejectingRequestId.value,
+        user.value.id,
+        rejectionReason.value
+      )
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError)
+    }
+    
     showRejectModal.value = false
     
     // Refresh the list
@@ -571,6 +616,8 @@ const confirmRejection = async () => {
       description: 'Failed to reject request',
       variant: 'destructive'
     })
+  } finally {
+    isRejecting.value = false
   }
 }
 

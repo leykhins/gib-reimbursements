@@ -132,7 +132,7 @@ const fetchReimbursementRequests = async () => {
         date,
         created_at,
         employee_id,
-        employee:employee_id (
+        employee:users!claims_employee_id_fkey (
           first_name,
           last_name
         ),

@@ -76,6 +76,11 @@ const showRejectModal = ref(false)
 const rejectingRequestId = ref(null)
 const rejectionReason = ref('')
 
+// Add these new refs for tracking different loading states
+const verifyingRequestIds = ref(new Set())  // For tracking individual request processing
+const isVerifying = ref(false)  // For bulk processing
+const isRejecting = ref(false)  // For rejection process
+
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
   try {
@@ -459,24 +464,48 @@ const isEmployeeFullySelected = (employeeId) => {
 }
 
 const verifySelectedRequests = async (requestId) => {
+  if (requestId) {
+    verifyingRequestIds.value.add(requestId)
+  }
   const requestsToVerify = requestId ? [requestId] : Array.from(selectedRequests.value)
   verifyingRequests.value = requestsToVerify
   showVerifyModal.value = true
+  if (requestId) {
+    verifyingRequestIds.value.delete(requestId)
+  }
 }
 
-// Add this new function to handle the actual verification
+// Update the confirmVerification function
 const confirmVerification = async () => {
   try {
-    const promises = verifyingRequests.value.map(id => 
-      client
-        .from('claims')
-        .update({
-          status: 'completed',
-          admin_verified_by: user.value.id,
-          admin_verified_at: new Date().toISOString()
-        })
-        .eq('id', id)
-    )
+    isVerifying.value = true
+    // Add all requests being verified to the tracking set
+    verifyingRequests.value.forEach(id => verifyingRequestIds.value.add(id))
+    
+    const promises = verifyingRequests.value.map(async (id) => {
+      try {
+        const { error: updateError } = await client
+          .from('claims')
+          .update({
+            status: 'completed',
+            accounting_processed_by: user.value.id,
+            accounting_processed_at: new Date().toISOString()
+          })
+          .eq('id', id)
+        
+        if (updateError) throw updateError
+        
+        // Send notification
+        try {
+          const { sendClaimProcessedEmail } = await import('~/lib/notifications')
+          await sendClaimProcessedEmail(id)
+        } catch (emailError) {
+          console.error('Failed to send email notification:', emailError)
+        }
+      } finally {
+        verifyingRequestIds.value.delete(id)
+      }
+    })
     
     await Promise.all(promises)
     
@@ -489,13 +518,16 @@ const confirmVerification = async () => {
     selectedRequests.value.clear()
     await fetchReimbursementRequests()
   } catch (err) {
-    console.error('Error verifying requests:', err)
+    console.error('Error processing requests:', err)
     toast({
       title: 'Error',
-      description: 'Failed to verify some requests',
+      description: 'Failed to process some requests',
       variant: 'destructive'
     })
     showVerifyModal.value = false
+  } finally {
+    isVerifying.value = false
+    verifyingRequestIds.value.clear()
   }
 }
 
@@ -538,15 +570,16 @@ const rejectRequest = async (requestId) => {
   showRejectModal.value = true
 }
 
-// Add this function to handle the actual rejection
+// Update the confirmRejection function
 const confirmRejection = async () => {
   try {
+    isRejecting.value = true
     const { error } = await client
       .from('claims')
       .update({
         status: 'rejected',
-        manager_approved_by: user.value.id,
-        manager_approved_at: new Date().toISOString(),
+        accounting_processed_by: user.value.id,
+        accounting_processed_at: new Date().toISOString(),
         rejection_reason: rejectionReason.value
       })
       .eq('id', rejectingRequestId.value)
@@ -570,7 +603,6 @@ const confirmRejection = async () => {
       )
     } catch (emailError) {
       console.error('Failed to send email notification:', emailError)
-      // Continue even if email fails - the claim is still rejected
     }
     
     showRejectModal.value = false
@@ -584,6 +616,8 @@ const confirmRejection = async () => {
       description: 'Failed to reject request',
       variant: 'destructive'
     })
+  } finally {
+    isRejecting.value = false
   }
 }
 
@@ -777,9 +811,19 @@ onMounted(async () => {
                 @click.stop="verifySelectedRequests(null)"
                 class="bg-green-600 hover:bg-green-700 text-white"
                 size="sm"
+                :disabled="isVerifying"
               >
-                <CheckCircle2 class="mr-2 h-4 w-4" />
-                Verify Selected ({{ selectedRequests.size }})
+                <template v-if="isVerifying">
+                  <svg class="animate-spin mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing...
+                </template>
+                <template v-else>
+                  <CheckCircle2 class="mr-2 h-4 w-4" />
+                  Process Selected ({{ selectedRequests.size }})
+                </template>
               </Button>
               <ChevronUp v-if="expandedEmployees[employeeId]" class="h-4 w-4" />
               <ChevronDown v-else class="h-4 w-4" />
@@ -960,9 +1004,18 @@ onMounted(async () => {
                                       size="sm"
                                       class="h-7 w-7 p-0 bg-green-100 hover:bg-green-200 text-green-800 rounded-md"
                                       @click="verifySelectedRequests(request.id)"
-                                      title="Complete Request"
+                                      :disabled="verifyingRequestIds.has(request.id)"
+                                      title="Process Request"
                                     >
-                                      <CheckCircle2 class="h-4 w-4" />
+                                      <template v-if="verifyingRequestIds.has(request.id)">
+                                        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                      </template>
+                                      <template v-else>
+                                        <CheckCircle2 class="h-4 w-4" />
+                                      </template>
                                     </Button>
                                     
                                     <Button 
@@ -971,9 +1024,18 @@ onMounted(async () => {
                                       size="sm"
                                       class="h-7 w-7 p-0 bg-red-100 hover:bg-red-200 text-red-800 rounded-md"
                                       @click="rejectRequest(request.id)"
+                                      :disabled="isRejecting && rejectingRequestId === request.id"
                                       title="Reject Request"
                                     >
-                                      <XCircle class="h-4 w-4" />
+                                      <template v-if="isRejecting && rejectingRequestId === request.id">
+                                        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                      </template>
+                                      <template v-else>
+                                        <XCircle class="h-4 w-4" />
+                                      </template>
                                     </Button>
                                   </div>
                                 </TableCell>
@@ -1012,19 +1074,29 @@ onMounted(async () => {
     <Dialog v-model:open="showVerifyModal">
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Confirm Verification</DialogTitle>
+          <DialogTitle>Confirm Processing</DialogTitle>
           <DialogDescription>
-            Are you sure you want to verify {{ verifyingRequests.length }} request{{ verifyingRequests.length > 1 ? 's' : '' }}?
+            Are you sure you want to process {{ verifyingRequests.length }} request{{ verifyingRequests.length > 1 ? 's' : '' }}?
             This action cannot be undone.
           </DialogDescription>
         </DialogHeader>
         <div class="flex justify-end space-x-2 mt-4">
-          <Button variant="outline" @click="showVerifyModal = false">Cancel</Button>
+          <Button variant="outline" @click="showVerifyModal = false" :disabled="isVerifying">Cancel</Button>
           <Button 
             class="bg-green-600 hover:bg-green-700 text-white"
             @click="confirmVerification"
+            :disabled="isVerifying"
           >
-            Verify
+            <template v-if="isVerifying">
+              <svg class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Processing...
+            </template>
+            <template v-else>
+              Process
+            </template>
           </Button>
         </div>
       </DialogContent>
@@ -1059,13 +1131,22 @@ onMounted(async () => {
           <Input id="rejection-reason" v-model="rejectionReason" />
         </div>
         <div class="flex justify-end space-x-2 mt-4">
-          <Button variant="outline" @click="showRejectModal = false">Cancel</Button>
+          <Button variant="outline" @click="showRejectModal = false" :disabled="isRejecting">Cancel</Button>
           <Button 
             class="bg-red-600 hover:bg-red-700 text-white"
             @click="confirmRejection"
-            :disabled="!rejectionReason.trim()"
+            :disabled="!rejectionReason.trim() || isRejecting"
           >
-            Reject
+            <template v-if="isRejecting">
+              <svg class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Rejecting...
+            </template>
+            <template v-else>
+              Reject
+            </template>
           </Button>
         </div>
       </DialogContent>

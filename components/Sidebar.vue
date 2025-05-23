@@ -41,7 +41,7 @@ const emit = defineEmits<{
     <div class="flex h-16 items-center justify-between border-b px-4">
       <div class="flex items-center">
         <img src="/gibraltar_rock.svg" alt="Gibraltar Rock" class="h-6 w-6" />
-        <h1 class="text-responsive-base font-semibold ml-2">Reimbursements</h1>
+        <h1 class="text-responsive-base font-semibold ml-2">GibClaim</h1>
       </div>
       <Button 
         variant="ghost" 
