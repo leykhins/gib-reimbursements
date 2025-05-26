@@ -712,12 +712,10 @@ definePageMeta({
               <SelectValue placeholder="Select role" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="Leadership">Leadership</SelectItem>
-              <SelectItem value="Admin/HR">Admin/HR</SelectItem>
-              <SelectItem value="Operations">Operations</SelectItem>
-              <SelectItem value="Project Management">Project Management</SelectItem>
-              <SelectItem value="Sales/Marketing">Sales/Marketing</SelectItem>
-              <SelectItem value="Finance">Finance</SelectItem>
+              <SelectItem value="accounting">Accounting</SelectItem>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="employee">Employee</SelectItem>
+              <SelectItem value="manager">Manager</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -788,12 +786,10 @@ definePageMeta({
               <SelectValue placeholder="Select role" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="Leadership">Leadership</SelectItem>
-              <SelectItem value="Admin/HR">Admin/HR</SelectItem>
-              <SelectItem value="Operations">Operations</SelectItem>
-              <SelectItem value="Project Management">Project Management</SelectItem>
-              <SelectItem value="Sales/Marketing">Sales/Marketing</SelectItem>
-              <SelectItem value="Finance">Finance</SelectItem>
+              <SelectItem value="accounting">Accounting</SelectItem>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="employee">Employee</SelectItem>
+              <SelectItem value="manager">Manager</SelectItem>
             </SelectContent>
           </Select>
         </div>
