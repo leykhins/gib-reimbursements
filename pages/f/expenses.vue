@@ -3,6 +3,11 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { usePdfMake } from 'nuxt-pdfmake'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Calendar } from '@/components/ui/calendar'
+import { DateRangePicker } from '@/components/ui/date-range-picker'
+import { addDays } from 'date-fns'
+import { cn } from '@/lib/utils'
 
 import { 
   CalendarIcon, 
@@ -24,6 +29,15 @@ import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import {
+  DateFormatter,
+  type DateValue,
+  getLocalTimeZone,
+  parseDate,
+  today,
+  CalendarDate
+} from '@internationalized/date'
+import { RangeCalendar } from '@/components/ui/range-calendar'
 
 definePageMeta({
   layout: 'accounting',
@@ -50,10 +64,12 @@ const filters = ref({
   jobNumber: '',
   categoryId: '',
   subcategoryId: '',
-  dateFrom: null,
-  dateTo: null,
+  dateRange: {
+    start: null,
+    end: null
+  },
   employeeName: '',
-  status: ''
+  status: 'all'
 })
 
 // Store signed URLs for receipts
@@ -179,16 +195,33 @@ const fetchReimbursementRequests = async () => {
   }
 }
 
-// Apply filters to reimbursement requests
+// Add this after other refs
+const df = new DateFormatter('en-US', {
+  dateStyle: 'long',
+})
+
+// Update the applyFilters function to use CalendarDate
 const applyFilters = () => {
   filteredRequests.value = reimbursementRequests.value.filter(request => {
-    const requestDate = new Date(request.date)
-    const requestMonth = requestDate.getMonth()
-    const requestYear = requestDate.getFullYear()
+    const requestDate = new CalendarDate(
+      new Date(request.date).getFullYear(),
+      new Date(request.date).getMonth() + 1,
+      new Date(request.date).getDate()
+    )
     
     // Month/Year filter
+    const requestMonth = requestDate.month - 1 // Adjust for 0-based months
+    const requestYear = requestDate.year
     if (requestMonth !== selectedMonth.value || requestYear !== selectedYear.value) {
       return false
+    }
+    
+    // Date range filter
+    if (filters.value.dateRange.start) {
+      if (requestDate.compare(filters.value.dateRange.start) < 0) return false
+    }
+    if (filters.value.dateRange.end) {
+      if (requestDate.compare(filters.value.dateRange.end) > 0) return false
     }
     
     // Job number filter
@@ -214,9 +247,11 @@ const applyFilters = () => {
       return false
     }
     
-    // Status filter (only if specified)
-    if (filters.value.status && request.status !== filters.value.status) {
-      return false
+    // Status filter
+    if (filters.value.status && filters.value.status !== 'all') {
+      if (request.status !== filters.value.status) {
+        return false
+      }
     }
     
     return true
@@ -233,6 +268,12 @@ const applyFilters = () => {
   }
 }
 
+// Update the formatDate function to handle dates correctly
+const formatDate = (date) => {
+  if (!date) return ''
+  const parsedDate = parseDate(date.split('T')[0])
+  return df.format(parsedDate.toDate(getLocalTimeZone()))
+}
 
 // Update the organizedData computed property
 const organizedData = computed(() => {
@@ -337,10 +378,6 @@ const formatCurrency = (amount) => {
     style: 'currency',
     currency: 'CAD'
   }).format(amount)
-}
-
-const formatDate = (dateString) => {
-  return format(new Date(dateString), 'MMM d, yyyy')
 }
 
 const formatStatus = (status) => {
@@ -696,9 +733,25 @@ const generateEmployeePDF = (employeeId) => {
           { text: 'Period: ', bold: true },
           `${monthName} ${yearStr}`
         ],
-        margin: [0, 5, 0, 15]
+        margin: [0, 5, 0, 0]
       }
     ]
+
+    // Add date range if it exists
+    if (filters.value.dateRange.start || filters.value.dateRange.end) {
+      docContent.push({
+        text: [
+          { text: 'Date Range: ', bold: true },
+          filters.value.dateRange.start ? df.format(filters.value.dateRange.start.toDate(getLocalTimeZone())) : '',
+          filters.value.dateRange.start && filters.value.dateRange.end ? ' - ' : '',
+          filters.value.dateRange.end ? df.format(filters.value.dateRange.end.toDate(getLocalTimeZone())) : ''
+        ],
+        margin: [0, 5, 0, 15]
+      })
+    } else {
+      // Add extra margin if no date range
+      docContent[docContent.length - 1].margin = [0, 5, 0, 15]
+    }
 
     // Create separate tables for each category
     let overallTotal = 0
@@ -1063,6 +1116,85 @@ onMounted(async () => {
     
     <!-- Border under months -->
     <div class="h-px w-full bg-border"></div>
+
+    <!-- Filters section -->
+    <div class="flex flex-col lg:flex-row gap-2 mt-4">
+      <!-- Status Filter -->
+      <div class="w-full lg:w-48 flex items-center gap-1">
+        <div class="flex-1">
+          <Select v-model="filters.status">
+            <SelectTrigger class="h-8 w-full">
+              <SelectValue placeholder="All Statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          v-if="filters.status !== 'all'"
+          variant="ghost"
+          size="icon"
+          class="h-8 w-8 shrink-0"
+          @click="filters.status = 'all'"
+        >
+          <XCircle class="h-4 w-4" />
+        </Button>
+      </div>
+
+      <!-- Date Range Filter -->
+      <div class="w-full lg:w-[350px] flex items-center gap-1">
+        <div class="flex-1">
+          <Popover>
+            <PopoverTrigger as-child>
+              <Button
+                variant="outline"
+                :class="cn(
+                  'w-full justify-start text-left font-normal h-8',
+                  !filters.dateRange.start && 'text-muted-foreground'
+                )"
+              >
+                <CalendarIcon class="mr-2 h-4 w-4" />
+                <template v-if="filters.dateRange.start">
+                  <template v-if="filters.dateRange.end">
+                    {{ df.format(filters.dateRange.start.toDate(getLocalTimeZone())) }} - 
+                    {{ df.format(filters.dateRange.end.toDate(getLocalTimeZone())) }}
+                  </template>
+                  <template v-else>
+                    {{ df.format(filters.dateRange.start.toDate(getLocalTimeZone())) }}
+                  </template>
+                </template>
+                <template v-else>
+                  Select date range
+                </template>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent class="w-auto p-0">
+              <RangeCalendar 
+                v-model="filters.dateRange"
+                initial-focus 
+                :number-of-months="2"
+                @update:start-value="(startDate) => filters.dateRange.start = startDate"
+                @update:end-value="(endDate) => filters.dateRange.end = endDate"
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+        <Button
+          v-if="filters.dateRange.start || filters.dateRange.end"
+          variant="ghost"
+          size="icon"
+          class="h-8 w-8 shrink-0"
+          @click="filters.dateRange = { start: null, end: null }"
+        >
+          <XCircle class="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
 
     <!-- Expenses List -->
     <div>
