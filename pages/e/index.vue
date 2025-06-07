@@ -6,12 +6,14 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  Plus
+  Plus,
+  Loader2
 } from 'lucide-vue-next'
 import { ref, onMounted, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
+import { getReceiptSignedUrl } from '~/lib/utils'
 
 definePageMeta({
   layout: 'employee',
@@ -38,6 +40,10 @@ const currentReceiptUrl = ref('')
 // Add this ref for viewing rejection details
 const viewingRejection = ref(false)
 const currentRejection = ref(null)
+
+// Add these new refs
+const isReceiptLoading = ref(false)
+const isImageReceipt = ref(false)
 
 // Function to get correct URL for receipt
 const getReceiptUrl = async (url, requestId) => {
@@ -69,15 +75,28 @@ const getReceiptUrl = async (url, requestId) => {
 const viewReceipt = async (receiptUrl, requestId) => {
   if (!receiptUrl) return
   
+  isReceiptLoading.value = true
+  currentReceiptUrl.value = '' // Clear the current URL while loading
+  viewingReceipt.value = true
+  
   try {
-    if (!receiptSignedUrls.value[requestId]) {
-      await getReceiptUrl(receiptUrl, requestId)
+    const { signedUrl, isImage } = await getReceiptSignedUrl(client, receiptUrl)
+    
+    if (!signedUrl) {
+      throw new Error('Failed to get signed URL')
     }
     
-    currentReceiptUrl.value = receiptSignedUrls.value[requestId]
-    viewingReceipt.value = true
+    currentReceiptUrl.value = signedUrl
+    isImageReceipt.value = isImage
   } catch (err) {
     console.error('Error viewing receipt:', err)
+    toast({
+      title: 'Error',
+      description: 'Could not load receipt',
+      variant: 'destructive'
+    })
+  } finally {
+    isReceiptLoading.value = false
   }
 }
 
@@ -416,8 +435,20 @@ const formatCategory = (categoryId) => {
           <DialogTitle class="text-sm">Receipt</DialogTitle>
         </DialogHeader>
         <div class="h-[70vh] overflow-auto">
+          <!-- Loading state -->
+          <div v-if="isReceiptLoading" class="flex items-center justify-center h-full">
+            <Loader2 class="h-8 w-8 animate-spin text-black" />
+          </div>
+          <!-- For image files -->
+          <img 
+            v-else-if="isImageReceipt" 
+            :src="currentReceiptUrl" 
+            class="max-w-full max-h-full object-contain mx-auto"
+            alt="Receipt"
+          />
+          <!-- For PDF files -->
           <iframe 
-            v-if="currentReceiptUrl" 
+            v-else
             :src="currentReceiptUrl" 
             class="w-full h-full"
           ></iframe>

@@ -14,12 +14,14 @@ import {
   XCircle,
   User,
   Clock,
-  CheckCircle
+  CheckCircle,
+  Loader2
 } from 'lucide-vue-next'
 import { format } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { getReceiptSignedUrl } from '~/lib/utils'
 
 definePageMeta({
   layout: 'admin',
@@ -80,6 +82,9 @@ const rejectionReason = ref('')
 const verifyingRequestIds = ref(new Set())  // For tracking individual request verification
 const isVerifying = ref(false)  // For bulk verification
 const isRejecting = ref(false)  // For rejection process
+
+// Add these refs
+const isImageReceipt = ref(false)
 
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
@@ -356,16 +361,17 @@ const viewReceipt = async (receiptUrl) => {
   if (!receiptUrl) return
   
   try {
-    const { data, error } = await client.storage
-      .from('receipts')
-      .createSignedUrl(receiptUrl, 60)
+    const { signedUrl, isImage } = await getReceiptSignedUrl(client, receiptUrl)
     
-    if (error) throw error
+    if (!signedUrl) {
+      throw new Error('Failed to get signed URL')
+    }
     
-    currentReceiptUrl.value = data.signedUrl
+    currentReceiptUrl.value = signedUrl
+    isImageReceipt.value = isImage
     viewingReceipt.value = true
   } catch (err) {
-    console.error('Error getting signed URL:', err)
+    console.error('Error viewing receipt:', err)
     toast({
       title: 'Error',
       description: 'Could not load receipt',
@@ -1078,8 +1084,20 @@ onMounted(async () => {
           <DialogTitle>Receipt</DialogTitle>
         </DialogHeader>
         <div class="h-[70vh] overflow-auto">
+          <!-- Loading state -->
+          <div v-if="!currentReceiptUrl" class="flex items-center justify-center h-full">
+            <Loader2 class="h-8 w-8 animate-spin text-black" />
+          </div>
+          <!-- For image files -->
+          <img 
+            v-else-if="isImageReceipt" 
+            :src="currentReceiptUrl" 
+            class="max-w-full max-h-full object-contain mx-auto"
+            alt="Receipt"
+          />
+          <!-- For PDF files -->
           <iframe 
-            v-if="currentReceiptUrl" 
+            v-else
             :src="currentReceiptUrl" 
             class="w-full h-full"
           ></iframe>

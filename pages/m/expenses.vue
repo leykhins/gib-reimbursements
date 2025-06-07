@@ -21,12 +21,14 @@ import {
   XCircle,
   User,
   Clock,
-  CheckCircle
+  CheckCircle,
+  Loader2
 } from 'lucide-vue-next'
 import { format } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { getReceiptSignedUrl } from '~/lib/utils'
 
 definePageMeta({
   layout: 'manager',
@@ -58,9 +60,6 @@ const filters = ref({
   employeeName: '',
   status: ''
 })
-
-// Store signed URLs for receipts
-const receiptSignedUrls = ref({})
 
 // Add these new refs after the existing refs
 const selectedYear = ref(new Date().getFullYear())
@@ -391,22 +390,28 @@ const formatStatus = (status) => {
 const viewReceipt = async (receiptUrl) => {
   if (!receiptUrl) return
   
+  isReceiptLoading.value = true
+  currentReceiptUrl.value = '' // Clear the current URL while loading
+  viewingReceipt.value = true
+  
   try {
-    const { data, error } = await client.storage
-      .from('receipts')
-      .createSignedUrl(receiptUrl, 60)
+    const { signedUrl, isImage } = await getReceiptSignedUrl(client, receiptUrl)
     
-    if (error) throw error
+    if (!signedUrl) {
+      throw new Error('Failed to get signed URL')
+    }
     
-    currentReceiptUrl.value = data.signedUrl
-    viewingReceipt.value = true
+    currentReceiptUrl.value = signedUrl
+    isImageReceipt.value = isImage
   } catch (err) {
-    console.error('Error getting signed URL:', err)
+    console.error('Error viewing receipt:', err)
     toast({
       title: 'Error',
       description: 'Could not load receipt',
       variant: 'destructive'
     })
+  } finally {
+    isReceiptLoading.value = false
   }
 }
 
@@ -697,6 +702,10 @@ const toggleJob = (employeeId, categoryKey, jobNumber) => {
   const key = `${employeeId}-${categoryKey}-${jobNumber}`
   expandedJobs.value[key] = !expandedJobs.value[key]
 }
+
+// Add new refs for receipt loading and image receipt
+const isReceiptLoading = ref(false)
+const isImageReceipt = ref(false)
 
 // Initialize
 onMounted(async () => {
@@ -1129,20 +1138,28 @@ onMounted(async () => {
 
   <!-- Receipt Viewing Modal -->
   <Dialog v-model:open="viewingReceipt">
-    <DialogContent class="sm:max-w-[800px] max-h-[90vh]">
+    <DialogContent class="max-w-4xl">
       <DialogHeader>
         <DialogTitle>Receipt</DialogTitle>
       </DialogHeader>
-      <div class="mt-4 w-full h-[600px] relative">
+      <div class="h-[70vh] overflow-auto">
+        <!-- Loading state -->
+        <div v-if="isReceiptLoading" class="flex items-center justify-center h-full">
+          <Loader2 class="h-8 w-8 animate-spin text-black" />
+        </div>
+        <!-- For image files -->
+        <img 
+          v-else-if="isImageReceipt" 
+          :src="currentReceiptUrl" 
+          class="max-w-full max-h-full object-contain mx-auto"
+          alt="Receipt"
+        />
+        <!-- For PDF files -->
         <iframe 
-          v-if="currentReceiptUrl"
-          :src="currentReceiptUrl"
-          class="w-full h-full border rounded-lg"
-          title="Receipt Preview"
+          v-else
+          :src="currentReceiptUrl" 
+          class="w-full h-full"
         ></iframe>
-      </div>
-      <div class="flex justify-end mt-4">
-        <Button @click="viewingReceipt = false">Close</Button>
       </div>
     </DialogContent>
   </Dialog>

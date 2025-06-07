@@ -18,6 +18,8 @@ import {
   DateFormatter,
   type DateValue,
   getLocalTimeZone,
+  today,
+  parseDate
 } from '@internationalized/date'
 
 // Add showConfirmModal ref
@@ -65,7 +67,7 @@ interface MileageEntry {
   startLocation: string;
   destination: string;
   distance: string;
-  date: Date;
+  date: DateValue;
   datePopoverOpen: boolean;
   subcategoryMappingId: string;
 }
@@ -77,7 +79,7 @@ interface Expense {
   amount: string
   gst_amount: string
   pst_amount: string
-  date: Date
+  date: DateValue
   categoryId: string
   subcategoryId: string
   subcategoryMappingId: string
@@ -105,7 +107,7 @@ const expenses = ref<Expense[]>([
     amount: '',
     gst_amount: '',
     pst_amount: '',
-    date: new Date(),
+    date: today(getLocalTimeZone()),
     categoryId: '',
     subcategoryId: '',
     subcategoryMappingId: '',
@@ -125,7 +127,7 @@ const expenses = ref<Expense[]>([
       startLocation: '',
       destination: '',
       distance: '',
-      date: new Date(),
+      date: today(getLocalTimeZone()),
       datePopoverOpen: false,
       subcategoryMappingId: '',
     }]
@@ -287,7 +289,7 @@ const addExpense = () => {
     amount: '',
     gst_amount: '',
     pst_amount: '',
-    date: previousExpense ? new Date(previousExpense.date) : new Date(), // Copy date from previous expense
+    date: previousExpense ? previousExpense.date : today(getLocalTimeZone()),
     categoryId: '',
     subcategoryId: '',
     subcategoryMappingId: '',
@@ -307,7 +309,7 @@ const addExpense = () => {
       startLocation: '', 
       destination: '', 
       distance: '',
-      date: new Date(),
+      date: today(getLocalTimeZone()),
       datePopoverOpen: false,
       subcategoryMappingId: '',
     }]
@@ -534,7 +536,7 @@ const confirmSubmit = async () => {
           amount: parseFloat(expense.amount),
           gst_amount: parseFloat(expense.gst_amount || '0'),
           pst_amount: parseFloat(expense.pst_amount || '0'),
-          date: inputDate.value ? inputDate.value.toDate(getLocalTimeZone()) : new Date(),
+          date: expense.date.toDate(getLocalTimeZone()),
           is_travel: isTravel,
           travel_distance: isTravel && expense.distance ? parseFloat(expense.distance) : null,
           travel_type: isTravel ? 'public_transport' : null,
@@ -839,8 +841,6 @@ const df = new DateFormatter('en-US', {
   dateStyle: 'long',
 })
 
-const inputDate = ref<DateValue>()
-
 // Add a function to add mileage entry
 const addMileageEntry = (expenseId: number) => {
   const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
@@ -1132,16 +1132,16 @@ const totalClaimsCount = computed(() => {
                       variant="outline"
                       :class="cn(
                         'w-full justify-start text-left font-normal',
-                        !inputDate && 'text-muted-foreground',
+                        !expense.date && 'text-muted-foreground',
                       )"
                     >
                       <CalendarIcon class="mr-2 h-4 w-4" />
-                      {{ inputDate ? df.format(inputDate.toDate(getLocalTimeZone())) : "Pick a date" }}
+                      {{ expense.date ? df.format(expense.date.toDate(getLocalTimeZone())) : "Pick a date" }}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent class="w-auto p-0">
                     <Calendar 
-                      v-model="inputDate" 
+                      v-model="expense.date" 
                       initial-focus 
                       @update:model-value="() => expense.datePopoverOpen = false"
                     />
@@ -1261,10 +1261,10 @@ const totalClaimsCount = computed(() => {
                           </PopoverTrigger>
                           <PopoverContent class="w-auto p-0">
                             <Calendar 
-                              v-model="entry.dateValue"
+                              v-model="entry.date"
                               initial-focus 
                               @update:model-value="() => {
-                                entry.date = entry.dateValue?.toDate(getLocalTimeZone());
+                                entry.date = entry.date;
                                 entry.datePopoverOpen = false;
                               }"
                             />
