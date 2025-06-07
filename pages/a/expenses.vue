@@ -22,7 +22,8 @@ import {
   User,
   Clock,
   CheckCircle,
-  Loader2
+  Loader2,
+  MessageSquare
 } from 'lucide-vue-next'
 import { format } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -87,6 +88,12 @@ const rejectionReason = ref('')
 const verifyingRequestIds = ref(new Set())  // For tracking individual request verification
 const isVerifying = ref(false)  // For bulk verification
 const isRejecting = ref(false)  // For rejection process
+
+// Add these refs after other refs
+const noteDialogOpen = ref(false)
+const newNote = ref('')
+const selectedClaim = ref(null)
+const userRole = ref('')
 
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
@@ -166,7 +173,14 @@ const fetchReimbursementRequests = async () => {
           subcategory:subcategory_id(id, subcategory_name)
         ),
         manager_approver:users!claims_manager_approved_by_fkey(first_name, last_name),
-        admin_verifier:users!claims_admin_verified_by_fkey(first_name, last_name)
+        admin_verifier:users!claims_admin_verified_by_fkey(first_name, last_name),
+        notes:claim_notes(
+          id,
+          note,
+          role,
+          created_at,
+          user_id
+        )
       `)
       .order('date', { ascending: false })
     
@@ -629,11 +643,69 @@ const confirmRejection = async () => {
   }
 }
 
+// Add these functions for note handling
+const openAddNoteDialog = (claim) => {
+  selectedClaim.value = claim
+  newNote.value = ''
+  noteDialogOpen.value = true
+}
+
+const saveNote = async () => {
+  if (!newNote.value.trim()) return
+  
+  try {
+    const { error } = await client
+      .from('claim_notes')
+      .insert({
+        claim_id: selectedClaim.value.id,
+        note: newNote.value.trim(),
+        role: userRole.value,
+        user_id: user.value.id
+      })
+    
+    if (error) throw error
+    
+    // Refresh the claims data
+    await fetchReimbursementRequests()
+    noteDialogOpen.value = false
+    toast({
+      title: 'Success',
+      description: 'Note added successfully'
+    })
+  } catch (err) {
+    console.error('Error adding note:', err)
+    toast({
+      title: 'Error',
+      description: 'Failed to add note',
+      variant: 'destructive'
+    })
+  }
+}
+
+// Add this function to fetch user role
+const fetchUserRole = async () => {
+  const { data, error } = await client
+    .from('users')
+    .select('role')
+    .eq('id', user.value.id)
+    .single()
+  
+  if (!error && data) {
+    userRole.value = data.role
+  }
+}
+
+// Add this helper function
+const getTotalNotes = (request) => {
+  return request.notes?.length || 0
+}
+
 // Initialize
 onMounted(async () => {
   await fetchAvailableYears()
   await fetchCategories()
   await fetchReimbursementRequests()
+  await fetchUserRole()
   
   // Set all employees expanded by default, but not the category entries
   sortedEmployeeKeys.value.forEach(employeeId => {
@@ -915,6 +987,17 @@ const isImageReceipt = ref(false)
                                 <TableHead class="uppercase">Description</TableHead>
                                 <TableHead class="uppercase">Amount</TableHead>
                                 <TableHead class="uppercase">Status</TableHead>
+                                <TableHead class="uppercase">
+                                  <div class="flex items-center gap-2">
+                                    Notes
+                                    <Badge 
+                                      v-if="getTotalNotes(jobGroup.requests[0]) > 0" 
+                                      class="h-5 px-1.5 bg-[#F15A1F] text-white"
+                                    >
+                                      {{ getTotalNotes(jobGroup.requests[0]) }}
+                                    </Badge>
+                                  </div>
+                                </TableHead>
                                 <TableHead class="uppercase">Actions</TableHead>
                               </TableRow>
                             </TableHeader>
@@ -974,6 +1057,16 @@ const isImageReceipt = ref(false)
                                   </span>
                                 </TableCell>
                                 <TableCell class="py-2">
+                                  <div v-if="request.notes && request.notes.length > 0" class="space-y-1">
+                                    <div v-for="note in request.notes" :key="note.id" class="text-sm">
+                                      <span class="font-medium capitalize">{{ note.role }}:</span> {{ note.note }}
+                                      <span class="text-xs text-muted-foreground ml-2">
+                                        {{ formatDate(note.created_at) }}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell class="py-2">
                                   <div class="flex space-x-2">
                                     <Button 
                                       variant="outline" 
@@ -1006,6 +1099,16 @@ const isImageReceipt = ref(false)
                                       title="Reject Request"
                                     >
                                       <XCircle class="h-4 w-4" />
+                                    </Button>
+
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      class="h-7 w-7 p-0 rounded-md"
+                                      @click="openAddNoteDialog(request)"
+                                      title="Add Note"
+                                    >
+                                      <MessageSquare class="h-4 w-4" />
                                     </Button>
                                   </div>
                                 </TableCell>
@@ -1112,6 +1215,33 @@ const isImageReceipt = ref(false)
         >
           Reject
         </Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+
+  <!-- Note Dialog -->
+  <Dialog v-model:open="noteDialogOpen">
+    <DialogContent class="sm:max-w-[600px]">
+      <DialogHeader>
+        <DialogTitle>Add Note</DialogTitle>
+        <DialogDescription>
+          Add a note to this expense claim. Notes are only visible to admin, manager, and accounting roles.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="space-y-4 py-4">
+        <div class="space-y-2">
+          <Label for="note">Note</Label>
+          <Textarea
+            id="note"
+            v-model="newNote"
+            placeholder="Enter your note here..."
+            class="min-h-[100px] resize-none"
+          />
+        </div>
+        <div class="flex justify-end space-x-2">
+          <Button variant="outline" @click="noteDialogOpen = false">Cancel</Button>
+          <Button @click="saveNote">Save Note</Button>
+        </div>
       </div>
     </DialogContent>
   </Dialog>
