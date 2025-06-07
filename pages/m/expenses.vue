@@ -21,12 +21,17 @@ import {
   XCircle,
   User,
   Clock,
-  CheckCircle
+  CheckCircle,
+  Loader2,
+  MessageSquare
 } from 'lucide-vue-next'
 import { format } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { getReceiptSignedUrl } from '~/lib/utils'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
 
 definePageMeta({
   layout: 'manager',
@@ -59,9 +64,6 @@ const filters = ref({
   status: ''
 })
 
-// Store signed URLs for receipts
-const receiptSignedUrls = ref({})
-
 // Add these new refs after the existing refs
 const selectedYear = ref(new Date().getFullYear())
 const selectedMonth = ref(new Date().getMonth())
@@ -87,6 +89,12 @@ const rejectionReason = ref('')
 const verifyingRequestIds = ref(new Set())  // For tracking individual request approval
 const isVerifying = ref(false)  // For bulk approval
 const isRejecting = ref(false)  // For rejection process
+
+// Add these refs after other refs
+const noteDialogOpen = ref(false)
+const newNote = ref('')
+const selectedClaim = ref(null)
+const userRole = ref('')
 
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
@@ -204,7 +212,14 @@ const fetchReimbursementRequests = async () => {
           subcategory:subcategory_id(id, subcategory_name)
         ),
         manager_approver:users!claims_manager_approved_by_fkey(first_name, last_name),
-        admin_verifier:users!claims_admin_verified_by_fkey(first_name, last_name)
+        admin_verifier:users!claims_admin_verified_by_fkey(first_name, last_name),
+        notes:claim_notes(
+          id,
+          note,
+          role,
+          created_at,
+          user_id
+        )
       `)
       .eq('users.department', managerDepartment)
       .order('date', { ascending: false })
@@ -391,22 +406,28 @@ const formatStatus = (status) => {
 const viewReceipt = async (receiptUrl) => {
   if (!receiptUrl) return
   
+  isReceiptLoading.value = true
+  currentReceiptUrl.value = '' // Clear the current URL while loading
+  viewingReceipt.value = true
+  
   try {
-    const { data, error } = await client.storage
-      .from('receipts')
-      .createSignedUrl(receiptUrl, 60)
+    const { signedUrl, isImage } = await getReceiptSignedUrl(client, receiptUrl)
     
-    if (error) throw error
+    if (!signedUrl) {
+      throw new Error('Failed to get signed URL')
+    }
     
-    currentReceiptUrl.value = data.signedUrl
-    viewingReceipt.value = true
+    currentReceiptUrl.value = signedUrl
+    isImageReceipt.value = isImage
   } catch (err) {
-    console.error('Error getting signed URL:', err)
+    console.error('Error viewing receipt:', err)
     toast({
       title: 'Error',
       description: 'Could not load receipt',
       variant: 'destructive'
     })
+  } finally {
+    isReceiptLoading.value = false
   }
 }
 
@@ -698,11 +719,73 @@ const toggleJob = (employeeId, categoryKey, jobNumber) => {
   expandedJobs.value[key] = !expandedJobs.value[key]
 }
 
+// Add new refs for receipt loading and image receipt
+const isReceiptLoading = ref(false)
+const isImageReceipt = ref(false)
+
+// Add this function to fetch user role
+const fetchUserRole = async () => {
+  const { data, error } = await client
+    .from('users')
+    .select('role')
+    .eq('id', user.value.id)
+    .single()
+  
+  if (!error && data) {
+    userRole.value = data.role
+  }
+}
+
+// Add these functions for note handling
+const openAddNoteDialog = (claim) => {
+  selectedClaim.value = claim
+  newNote.value = ''
+  noteDialogOpen.value = true
+}
+
+const saveNote = async () => {
+  if (!newNote.value.trim()) return
+  
+  try {
+    const { error } = await client
+      .from('claim_notes')
+      .insert({
+        claim_id: selectedClaim.value.id,
+        note: newNote.value.trim(),
+        role: userRole.value,
+        user_id: user.value.id
+      })
+    
+    if (error) throw error
+    
+    // Refresh the claims data
+    await fetchReimbursementRequests()
+    noteDialogOpen.value = false
+    toast({
+      title: 'Success',
+      description: 'Note added successfully'
+    })
+  } catch (err) {
+    console.error('Error adding note:', err)
+    toast({
+      title: 'Error',
+      description: 'Failed to add note',
+      variant: 'destructive'
+    })
+  }
+}
+
+// Add this helper function
+const getTotalNotes = (request) => {
+  return request.notes?.length || 0
+}
+
 // Initialize
 onMounted(async () => {
   await fetchAvailableYears()
   await fetchCategories()
   await fetchReimbursementRequests()
+  await fetchUserRole()
   
   // Set all employees expanded by default, but not the category entries
   sortedEmployeeKeys.value.forEach(employeeId => {
@@ -981,6 +1064,17 @@ onMounted(async () => {
                                 <TableHead class="uppercase">Description</TableHead>
                                 <TableHead class="uppercase">Amount</TableHead>
                                 <TableHead class="uppercase">Status</TableHead>
+                                <TableHead class="uppercase">
+                                  <div class="flex items-center gap-2">
+                                    Notes
+                                    <Badge 
+                                      v-if="getTotalNotes(jobGroup.requests[0]) > 0" 
+                                      class="h-5 px-1.5 bg-[#F15A1F] text-white"
+                                    >
+                                      {{ getTotalNotes(jobGroup.requests[0]) }}
+                                    </Badge>
+                                  </div>
+                                </TableHead>
                                 <TableHead class="uppercase">Actions</TableHead>
                               </TableRow>
                             </TableHeader>
@@ -1039,6 +1133,16 @@ onMounted(async () => {
                                     </span>
                                 </TableCell>
                                 <TableCell class="py-2">
+                                  <div v-if="request.notes && request.notes.length > 0" class="space-y-1">
+                                    <div v-for="note in request.notes" :key="note.id" class="text-sm">
+                                      <span class="font-medium capitalize">{{ note.role }}:</span> {{ note.note }}
+                                      <span class="text-xs text-muted-foreground ml-2">
+                                        {{ formatDate(note.created_at) }}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell class="py-2">
                                   <div class="flex space-x-2">
                                     <Button 
                                       variant="outline" 
@@ -1049,6 +1153,16 @@ onMounted(async () => {
                                       title="View Receipt"
                                     >
                                       <FileText class="h-4 w-4" /> 
+                                    </Button>
+
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      class="h-7 w-7 p-0 rounded-md"
+                                      @click="openAddNoteDialog(request)"
+                                      title="Add Note"
+                                    >
+                                      <MessageSquare class="h-4 w-4" />
                                     </Button>
                                     
                                     <Button 
@@ -1129,20 +1243,28 @@ onMounted(async () => {
 
   <!-- Receipt Viewing Modal -->
   <Dialog v-model:open="viewingReceipt">
-    <DialogContent class="sm:max-w-[800px] max-h-[90vh]">
+    <DialogContent class="max-w-4xl">
       <DialogHeader>
         <DialogTitle>Receipt</DialogTitle>
       </DialogHeader>
-      <div class="mt-4 w-full h-[600px] relative">
+      <div class="h-[70vh] overflow-auto">
+        <!-- Loading state -->
+        <div v-if="isReceiptLoading" class="flex items-center justify-center h-full">
+          <Loader2 class="h-8 w-8 animate-spin text-black" />
+        </div>
+        <!-- For image files -->
+        <img 
+          v-else-if="isImageReceipt" 
+          :src="currentReceiptUrl" 
+          class="max-w-full max-h-full object-contain mx-auto"
+          alt="Receipt"
+        />
+        <!-- For PDF files -->
         <iframe 
-          v-if="currentReceiptUrl"
-          :src="currentReceiptUrl"
-          class="w-full h-full border rounded-lg"
-          title="Receipt Preview"
+          v-else
+          :src="currentReceiptUrl" 
+          class="w-full h-full"
         ></iframe>
-      </div>
-      <div class="flex justify-end mt-4">
-        <Button @click="viewingReceipt = false">Close</Button>
       </div>
     </DialogContent>
   </Dialog>
@@ -1169,6 +1291,33 @@ onMounted(async () => {
         >
           Reject
         </Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+
+  <!-- Note Dialog -->
+  <Dialog v-model:open="noteDialogOpen">
+    <DialogContent class="sm:max-w-[600px]">
+      <DialogHeader>
+        <DialogTitle>Add Note</DialogTitle>
+        <DialogDescription>
+          Add a note to this expense claim. Notes are only visible to admin, manager, and accounting roles.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="space-y-4 py-4">
+        <div class="space-y-2">
+          <Label for="note">Note</Label>
+          <Textarea
+            id="note"
+            v-model="newNote"
+            placeholder="Enter your note here..."
+            class="min-h-[100px] resize-none"
+          />
+        </div>
+        <div class="flex justify-end space-x-2">
+          <Button variant="outline" @click="noteDialogOpen = false">Cancel</Button>
+          <Button @click="saveNote">Save Note</Button>
+        </div>
       </div>
     </DialogContent>
   </Dialog>

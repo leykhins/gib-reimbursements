@@ -2,6 +2,9 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { MessageSquare } from 'lucide-vue-next'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
 
 import { 
   CalendarIcon, 
@@ -14,12 +17,20 @@ import {
   XCircle,
   User,
   Clock,
-  CheckCircle
+  CheckCircle,
+  Loader2
 } from 'lucide-vue-next'
 import { format } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { getReceiptSignedUrl } from '~/lib/utils'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 definePageMeta({
   layout: 'admin',
@@ -80,6 +91,15 @@ const rejectionReason = ref('')
 const verifyingRequestIds = ref(new Set())  // For tracking individual request verification
 const isVerifying = ref(false)  // For bulk verification
 const isRejecting = ref(false)  // For rejection process
+
+// Add these refs
+const isImageReceipt = ref(false)
+
+// Add these refs
+const noteDialogOpen = ref(false)
+const newNote = ref('')
+const selectedClaim = ref(null)
+const userRole = ref('')
 
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
@@ -153,17 +173,23 @@ const fetchReimbursementRequests = async () => {
       .from('claims')
       .select(`
         *,
-        profiles:users!claims_employee_id_fkey(first_name, last_name, department),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
           subcategory:subcategory_id(id, subcategory_name)
         ),
-        manager_approver:users!claims_manager_approved_by_fkey(first_name, last_name),
-        admin_verifier:users!claims_admin_verified_by_fkey(first_name, last_name)
+        notes:claim_notes(
+          id,
+          note,
+          role,
+          created_at,
+          user:user_id(
+            id,
+            email
+          )
+        )
       `)
-      .eq('status', 'pending')
-      .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
     
     if (fetchError) throw fetchError
     
@@ -356,16 +382,17 @@ const viewReceipt = async (receiptUrl) => {
   if (!receiptUrl) return
   
   try {
-    const { data, error } = await client.storage
-      .from('receipts')
-      .createSignedUrl(receiptUrl, 60)
+    const { signedUrl, isImage } = await getReceiptSignedUrl(client, receiptUrl)
     
-    if (error) throw error
+    if (!signedUrl) {
+      throw new Error('Failed to get signed URL')
+    }
     
-    currentReceiptUrl.value = data.signedUrl
+    currentReceiptUrl.value = signedUrl
+    isImageReceipt.value = isImage
     viewingReceipt.value = true
   } catch (err) {
-    console.error('Error getting signed URL:', err)
+    console.error('Error viewing receipt:', err)
     toast({
       title: 'Error',
       description: 'Could not load receipt',
@@ -649,6 +676,58 @@ const hasEmployeeSelectedRequests = (employeeId) => {
   )
 }
 
+// Add this function to fetch user role
+const fetchUserRole = async () => {
+  const { data, error } = await client
+    .from('users')
+    .select('role')
+    .eq('id', user.value.id)
+    .single()
+  
+  if (!error && data) {
+    userRole.value = data.role
+  }
+}
+
+// Add these functions for note handling
+const openAddNoteDialog = (claim) => {
+  selectedClaim.value = claim
+  newNote.value = ''
+  noteDialogOpen.value = true
+}
+
+const saveNote = async () => {
+  if (!newNote.value.trim()) return
+  
+  try {
+    const { error } = await client
+      .from('claim_notes')
+      .insert({
+        claim_id: selectedClaim.value.id,
+        note: newNote.value.trim(),
+        role: userRole.value,
+        user_id: user.value.id
+      })
+    
+    if (error) throw error
+    
+    // Refresh the claims data
+    await fetchReimbursementRequests()
+    noteDialogOpen.value = false
+    toast({
+      title: 'Success',
+      description: 'Note added successfully'
+    })
+  } catch (err) {
+    console.error('Error adding note:', err)
+    toast({
+      title: 'Error',
+      description: 'Failed to add note',
+      variant: 'destructive'
+    })
+  }
+}
+
 // Initialize
 onMounted(async () => {
   try {
@@ -656,6 +735,7 @@ onMounted(async () => {
     await fetchAvailableYears()
     await fetchCategories()
     await fetchReimbursementRequests()
+    await fetchUserRole()
   } catch (err) {
     console.error('Error during initialization:', err)
     error.value = 'Failed to initialize the page'
@@ -663,6 +743,10 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+const getTotalNotes = (request) => {
+  return request.notes?.length || 0
+}
 </script>
 
 <template>
@@ -940,6 +1024,17 @@ onMounted(async () => {
                                 <TableHead class="uppercase">Description</TableHead>
                                 <TableHead class="uppercase">Amount</TableHead>
                                 <TableHead class="uppercase">Status</TableHead>
+                                <TableHead class="uppercase">
+                                  <div class="flex items-center gap-2">
+                                    Notes
+                                    <Badge 
+                                      v-if="getTotalNotes(jobGroup.requests[0]) > 0" 
+                                      class="h-5 px-1.5 bg-[#F15A1F] text-white"
+                                    >
+                                      {{ getTotalNotes(jobGroup.requests[0]) }}
+                                    </Badge>
+                                  </div>
+                                </TableHead>
                                 <TableHead class="uppercase">Actions</TableHead>
                               </TableRow>
                             </TableHeader>
@@ -1003,6 +1098,16 @@ onMounted(async () => {
                                       </span>
                                   </TableCell>
                                 <TableCell class="py-2">
+                                  <div v-if="request.notes && request.notes.length > 0" class="space-y-1">
+                                    <div v-for="note in request.notes" :key="note.id" class="text-sm">
+                                      <span class="font-medium capitalize">{{ note.role }}:</span> {{ note.note }}
+                                      <span class="text-xs text-muted-foreground ml-2">
+                                        {{ formatDate(note.created_at) }}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell class="py-2">
                                   <div class="flex space-x-2">
                                     <Button 
                                       variant="outline" 
@@ -1016,23 +1121,24 @@ onMounted(async () => {
                                     </Button>
                                     
                                     <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      class="h-7 w-7 p-0 rounded-md"
+                                      @click="openAddNoteDialog(request)"
+                                      title="Add Note"
+                                    >
+                                      <MessageSquare class="h-4 w-4" />
+                                    </Button>
+                                    
+                                    <Button 
                                       v-if="request.status === 'pending'"
                                       variant="outline" 
                                       size="sm"
                                       class="h-7 w-7 p-0 bg-green-100 hover:bg-green-200 text-green-800 rounded-md"
                                       @click="verifySelectedRequests(request.id)"
-                                      :disabled="verifyingRequestIds.has(request.id)"
                                       title="Approve Request"
                                     >
-                                      <template v-if="verifyingRequestIds.has(request.id)">
-                                        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                      </template>
-                                      <template v-else>
-                                        <CheckCircle2 class="h-4 w-4" />
-                                      </template>
+                                      <CheckCircle2 class="h-4 w-4" />
                                     </Button>
                                     
                                     <Button 
@@ -1041,18 +1147,9 @@ onMounted(async () => {
                                       size="sm"
                                       class="h-7 w-7 p-0 bg-red-100 hover:bg-red-200 text-red-800 rounded-md"
                                       @click="rejectRequest(request.id)"
-                                      :disabled="isRejecting && rejectingRequestId === request.id"
                                       title="Reject Request"
                                     >
-                                      <template v-if="isRejecting && rejectingRequestId === request.id">
-                                        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                      </template>
-                                      <template v-else>
-                                        <XCircle class="h-4 w-4" />
-                                      </template>
+                                      <XCircle class="h-4 w-4" />
                                     </Button>
                                   </div>
                                 </TableCell>
@@ -1078,8 +1175,20 @@ onMounted(async () => {
           <DialogTitle>Receipt</DialogTitle>
         </DialogHeader>
         <div class="h-[70vh] overflow-auto">
+          <!-- Loading state -->
+          <div v-if="!currentReceiptUrl" class="flex items-center justify-center h-full">
+            <Loader2 class="h-8 w-8 animate-spin text-black" />
+          </div>
+          <!-- For image files -->
+          <img 
+            v-else-if="isImageReceipt" 
+            :src="currentReceiptUrl" 
+            class="max-w-full max-h-full object-contain mx-auto"
+            alt="Receipt"
+          />
+          <!-- For PDF files -->
           <iframe 
-            v-if="currentReceiptUrl" 
+            v-else
             :src="currentReceiptUrl" 
             class="w-full h-full"
           ></iframe>
@@ -1165,6 +1274,33 @@ onMounted(async () => {
               Reject
             </template>
           </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Note Dialog -->
+    <Dialog v-model:open="noteDialogOpen">
+      <DialogContent class="sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle>Add Note</DialogTitle>
+          <DialogDescription>
+            Add a note to this expense claim. Notes are only visible to admin, manager, and accounting roles.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4 py-4">
+          <div class="space-y-2">
+            <Label for="note">Note</Label>
+            <Textarea
+              id="note"
+              v-model="newNote"
+              placeholder="Enter your note here..."
+              class="min-h-[100px] resize-none"
+            />
+          </div>
+          <div class="flex justify-end space-x-2">
+            <Button variant="outline" @click="noteDialogOpen = false">Cancel</Button>
+            <Button @click="saveNote">Save Note</Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
