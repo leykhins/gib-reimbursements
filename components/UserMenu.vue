@@ -123,7 +123,7 @@ const handleLogout = async () => {
   <DropdownMenu v-if="user">
     <DropdownMenuTrigger class="focus:outline-none">
       <Avatar class="h-8 w-8 cursor-pointer">
-        <AvatarFallback>{{ getInitials() }}</AvatarFallback>
+        <AvatarFallback class="bg-secondary text-white">{{ getInitials() }}</AvatarFallback>
       </Avatar>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" class="w-56">

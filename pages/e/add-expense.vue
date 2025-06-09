@@ -28,6 +28,8 @@ const showConfirmModal = ref(false)
 // Add these refs at the top with other refs
 const showDebugModal = ref(false)
 const debugData = ref<any>(null)
+const isDragging = ref<Record<number, boolean>>({})
+const dragCounter = ref<Record<number, number>>({})
 
 definePageMeta({
   layout: 'employee',
@@ -856,17 +858,17 @@ const addMileageEntry = (expenseId: number) => {
     ? expenses.value[expenseIndex].mileageEntries[expenses.value[expenseIndex].mileageEntries.length - 1].subcategoryMappingId 
     : '';
   
-  // Use a deep-copy of today's date to ensure each entry has its own date object
-  const today = new Date();
+  // Create a new DateValue using today() from @internationalized/date
+  const todayDate = today(getLocalTimeZone())
   
   expenses.value[expenseIndex].mileageEntries.push({
     jobNumber: '',
     startLocation: '',
     destination: '',
     distance: '',
-    date: today,
+    date: todayDate, // Use the DateValue directly
     datePopoverOpen: false,
-    subcategoryMappingId: previousSubcategoryId // Copy from previous entry
+    subcategoryMappingId: previousSubcategoryId
   })
   
   // Setup autocomplete for new fields
@@ -947,6 +949,51 @@ const totalClaimsCount = computed(() => {
     return total + 1;
   }, 0);
 });
+
+// Add these methods after the existing file handling methods
+const handleDragEnter = (event: DragEvent, expenseId: number) => {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  if (!dragCounter.value[expenseId]) {
+    dragCounter.value[expenseId] = 0
+  }
+  dragCounter.value[expenseId]++
+  isDragging.value[expenseId] = true
+}
+
+const handleDragLeave = (event: DragEvent, expenseId: number) => {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  dragCounter.value[expenseId]--
+  if (dragCounter.value[expenseId] === 0) {
+    isDragging.value[expenseId] = false
+  }
+}
+
+const handleDragOver = (event: DragEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+}
+
+const handleDrop = async (event: DragEvent, expenseId: number) => {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  isDragging.value[expenseId] = false
+  dragCounter.value[expenseId] = 0
+  
+  const files = event.dataTransfer?.files
+  if (files && files.length > 0) {
+    const file = files[0]
+    const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+    if (expenseIndex !== -1) {
+      expenses.value[expenseIndex].receipt = file
+      await uploadFile(file, expenseId)
+    }
+  }
+}
 
 </script>
 
@@ -1188,8 +1235,8 @@ const totalClaimsCount = computed(() => {
                 />
               </div>
               
-              <!-- Amount, GST, and PST fields in one row -->
-              <div v-if="expense.categoryId && !dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
+              <!-- Regular expense fields -->
+              <div v-if="!expense.categoryId || !dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <!-- Amount -->
                   <div class="space-y-2">
@@ -1237,8 +1284,8 @@ const totalClaimsCount = computed(() => {
                 </div>
               </div>
 
-              <!-- Car Mileage specific fields - responsive layout -->
-              <div v-if="expense.categoryId && dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
+              <!-- Car Mileage specific fields -->
+              <div v-else-if="expense.categoryId && dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
                 <div class="grid grid-cols-1 gap-4">
                   <!-- Multiple entries for mileage - inline on desktop, stacked on mobile -->
                   <div v-for="(entry, entryIndex) in expense.mileageEntries || [{}]" :key="entryIndex">
@@ -1256,7 +1303,9 @@ const totalClaimsCount = computed(() => {
                               )"
                             >
                               <CalendarIcon class="mr-2 h-3 w-3 md:h-4 md:w-4" />
-                              {{ entry.date ? df.format(entry.date) : "Pick a date" }}
+                              {{ entry.date && typeof entry.date.toDate === 'function' 
+                                ? df.format(entry.date.toDate(getLocalTimeZone())) 
+                                : "Pick a date" }}
                             </Button>
                           </PopoverTrigger>
                           <PopoverContent class="w-auto p-0">
@@ -1264,7 +1313,6 @@ const totalClaimsCount = computed(() => {
                               v-model="entry.date"
                               initial-focus 
                               @update:model-value="() => {
-                                entry.date = entry.date;
                                 entry.datePopoverOpen = false;
                               }"
                             />
@@ -1413,7 +1461,18 @@ const totalClaimsCount = computed(() => {
                 </Label>
                 
                 <!-- If no receipt is uploaded yet -->
-                <div v-if="!receiptPaths[expense.id]" class="border-2 border-dashed rounded-md p-4 text-center">
+                <div 
+                  v-if="!receiptPaths[expense.id]" 
+                  class="border-2 border-dashed rounded-md p-4 text-center transition-colors duration-200"
+                  :class="{
+                    'border-gray-300 bg-gray-50': !isDragging[expense.id],
+                    'border-primary bg-primary/5': isDragging[expense.id]
+                  }"
+                  @dragenter="(e) => handleDragEnter(e, expense.id)"
+                  @dragleave="(e) => handleDragLeave(e, expense.id)"
+                  @dragover="handleDragOver"
+                  @drop="(e) => handleDrop(e, expense.id)"
+                >
                   <input 
                     type="file" 
                     :id="`receipt-${expense.id}`" 
@@ -1424,9 +1483,9 @@ const totalClaimsCount = computed(() => {
                   />
                   <label :for="`receipt-${expense.id}`" class="cursor-pointer">
                     <div class="flex flex-col items-center justify-center">
-                      <Upload class="h-8 w-8 mb-2 text-gray-400" />
+                      <Upload class="h-8 w-8 mb-2" :class="isDragging[expense.id] ? 'text-primary' : 'text-gray-400'" />
                       <p class="text-responsive-sm font-medium">
-                        {{ uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click to upload receipt' }}
+                        {{ isDragging[expense.id] ? 'Drop file here' : uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click or drag file here' }}
                       </p>
                       <p class="text-responsive-xs text-gray-500 mt-1">
                         JPG, PNG or PDF (max. 10MB)
@@ -1573,5 +1632,19 @@ const totalClaimsCount = computed(() => {
   opacity: 0;
   max-height: 0;
   transform: translateY(-10px);
+}
+
+/* Add these styles to your existing style section */
+.border-dashed {
+  border-style: dashed;
+}
+
+.transition-colors {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.duration-200 {
+  transition-duration: 200ms;
 }
 </style>
