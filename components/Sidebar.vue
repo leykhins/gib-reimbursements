@@ -58,10 +58,10 @@ const emit = defineEmits<{
         :key="item.name"
         :to="item.path"
         :class="[
-          'flex items-center rounded-md px-3 py-2 text-responsive-sm font-medium',
+          'flex items-center rounded-md px-3 py-2 text-responsive-sm font-medium relative',
           route.path === item.path
-            ? 'bg-primary text-white'
-            : 'text-muted-foreground hover:bg-primary hover:text-white'
+            ? 'bg-secondary/20 text-secondary border-l-4 border-secondary'
+            : 'text-muted-foreground hover:bg-secondary/20 hover:text-secondary'
         ]"
       >
         <component :is="item.icon" class="mr-3 h-5 w-5" />

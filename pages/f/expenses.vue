@@ -1472,7 +1472,7 @@ const getTotalNotes = (request) => {
                         leave-to-class="opacity-0 -translate-y-2"
                       >
                         <div v-if="expandedJobs[`${employeeId}-${categoryId}-${jobNumber}`]" class="border-t">
-                          <Table>
+                          <Table class="bg-white">
                             <TableHeader>
                               <TableRow class="bg-muted/50 hover:bg-muted/50">
                                 <TableHead class="w-[50px]"></TableHead>

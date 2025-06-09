@@ -124,7 +124,7 @@ const fetchAvailableYears = async () => {
     const { data, error } = await client
       .from('claims')
       .select('date')
-      .eq('status', 'admin_verified')
+      .eq('status', 'verified')
       .in('employee_id', employeeIds)
     
     if (error) throw error
@@ -244,7 +244,7 @@ const fetchReimbursementRequests = async () => {
           user_id
         )
       `)
-      .eq('status', 'admin_verified')
+      .eq('status', 'verified')
       .in('employee_id', employeeIds)
       .order('date', { ascending: false })
     
@@ -279,7 +279,7 @@ const applyFilters = () => {
     }
     
     // Only show admin_verified requests
-    if (request.status !== 'admin_verified') {
+    if (request.status !== 'verified') {
       return false
     }
     
@@ -840,8 +840,9 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-6">
-    <div class="flex justify-between items-center">
-      <h1 class="text-xl font-bold">Verified Reimbursements</h1>
+    <div class="flex-col justify-between items-center">
+      <h1 class="text-xl font-bold">Pending Approvals</h1>
+      <p class="text-sm text-muted-foreground">Claims verified by admin, awaiting manager approval</p>
     </div>
     
     <!-- Month navigation tabs -->
@@ -1082,7 +1083,7 @@ onMounted(async () => {
                          class="border-t">
                       <!-- Job Header -->
                       <div 
-                        class="flex justify-between items-center p-2 bg-muted/30 cursor-pointer hover:bg-muted/50"
+                        class="flex justify-between items-center p-2 bg-white cursor-pointer hover:bg-muted/50"
                         @click="toggleJob(employeeId, categoryId, jobNumber)"
                       >
                         <div class="flex items-center gap-2">
@@ -1105,7 +1106,7 @@ onMounted(async () => {
                         leave-to-class="opacity-0 -translate-y-2"
                       >
                         <div v-if="expandedJobs[`${employeeId}-${categoryId}-${jobNumber}`]" class="border-t">
-                          <Table>
+                          <Table class="bg-white">
                             <TableHeader>
                               <TableRow class="bg-muted/50 hover:bg-muted/50">
                                 <TableHead class="w-[50px]"></TableHead>

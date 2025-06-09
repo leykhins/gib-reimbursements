@@ -654,7 +654,7 @@ onMounted(async () => {
                   leave-to-class="opacity-0 max-h-0 overflow-hidden"
                 >
                   <div v-if="expandedJobs[`${categoryId}-${jobNumber}`]" class="border-t">
-                    <Table>
+                    <Table class="bg-white">
                       <TableHeader>
                         <TableRow class="bg-muted/50 hover:bg-muted/50">
                           <TableHead class="uppercase text-xs font-medium text-muted-foreground">Date</TableHead>
