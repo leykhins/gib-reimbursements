@@ -508,8 +508,8 @@ onMounted(async () => {
                   v-for="(month, index) in months" 
                   :key="index"
                   :class="[
-                    'px-2 py-1 whitespace-nowrap text-sm shrink-0',
-                    selectedMonth === index ? 'bg-primary text-primary-foreground rounded-md' : 'hover:bg-secondary'
+                    'px-2 py-1 whitespace-nowrap text-sm shrink-0 rounded-md',
+                    selectedMonth === index ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary hover:text-white'
                   ]"
                   @click="changeMonth(index)"
                 >
