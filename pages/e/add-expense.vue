@@ -505,7 +505,7 @@ const confirmSubmit = async () => {
             amount: parseFloat(amount),
             gst_amount: 0,
             pst_amount: 0,
-            date: entry.date,
+            date: entry.date.toDate(getLocalTimeZone()),
             is_travel: true,
             travel_distance: parseFloat(entry.distance),
             travel_type: 'car',

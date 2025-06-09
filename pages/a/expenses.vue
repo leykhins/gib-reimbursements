@@ -133,19 +133,33 @@ const fetchAvailableYears = async () => {
 const fetchCategories = async () => {
   try {
     const { data: categoryData, error: categoryError } = await client
-      .from('expense_categories')
+      .from('claim_categories')
       .select(`
         id,
-        name,
-        expense_subcategories (
-          id,
-          name
+        category_name,
+        claim_subcategories:category_subcategory_mapping(
+          subcategory_id,
+          subcategory:subcategory_id(
+            id, 
+            subcategory_name
+          )
         )
       `)
-      .order('name')
+      .order('category_name')
     
     if (categoryError) throw categoryError
-    categories.value = categoryData || []
+    
+    // Transform the data to match the expected format
+    const transformedCategories = categoryData?.map(category => ({
+      id: category.id,
+      name: category.category_name,
+      expense_subcategories: category.claim_subcategories?.map(mapping => ({
+        id: mapping.subcategory?.id,
+        name: mapping.subcategory?.subcategory_name
+      })) || []
+    })) || []
+    
+    categories.value = transformedCategories
   } catch (err) {
     console.error('Error fetching categories:', err)
     toast({
@@ -166,7 +180,7 @@ const fetchReimbursementRequests = async () => {
       .from('claims')
       .select(`
         *,
-        profiles:users!claims_employee_id_fkey(first_name, last_name, department),
+        users:users!claims_employee_id_fkey(first_name, last_name, department),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
@@ -186,7 +200,18 @@ const fetchReimbursementRequests = async () => {
     
     if (fetchError) throw fetchError
     
-    reimbursementRequests.value = data || []
+    // Filter out claims that don't have valid user data
+    const validClaims = (data || []).filter(claim => {
+      if (!claim.users || !claim.users.first_name || !claim.users.last_name) {
+        console.warn('Filtering out claim with missing user data:', claim.id)
+        return false
+      }
+      return true
+    })
+    
+    reimbursementRequests.value = validClaims
+    console.log('Valid claims loaded:', validClaims.length)
+    
     applyFilters()
   } catch (err) {
     console.error('Error fetching claims:', err)
@@ -199,6 +224,11 @@ const fetchReimbursementRequests = async () => {
 // Apply filters to reimbursement requests
 const applyFilters = () => {
   filteredRequests.value = reimbursementRequests.value.filter(request => {
+    // Additional safety check - ensure user data exists
+    if (!request.users || !request.users.first_name || !request.users.last_name) {
+      return false
+    }
+    
     const requestDate = new Date(request.date)
     const requestMonth = requestDate.getMonth()
     const requestYear = requestDate.getFullYear()
@@ -215,7 +245,7 @@ const applyFilters = () => {
     
     // Employee name filter
     if (filters.value.employeeName) {
-      const fullName = `${request.profiles?.first_name} ${request.profiles?.last_name}`.toLowerCase()
+      const fullName = `${request.users.first_name} ${request.users.last_name}`.toLowerCase()
       if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
         return false
       }
@@ -250,10 +280,15 @@ const organizedData = computed(() => {
   
   filteredRequests.value.forEach(request => {
     const employeeId = request.employee_id
-    const employeeName = request.profiles ? 
-      `${request.profiles.first_name} ${request.profiles.last_name}` : 
-      'Unknown Employee'
-    const employeeDept = request.profiles?.department || 'Unknown Department'
+    
+    // Skip if user data is missing or invalid (should not happen due to filtering above)
+    if (!request.users || !request.users.first_name || !request.users.last_name) {
+      console.warn('Skipping request with missing user data:', request.id)
+      return
+    }
+    
+    const employeeName = `${request.users.first_name} ${request.users.last_name}`
+    const employeeDept = request.users.department || 'Unknown Department'
     
     if (!organized[employeeId]) {
       organized[employeeId] = {

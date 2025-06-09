@@ -94,10 +94,38 @@ const userRole = ref('')
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
   try {
+    // First get the manager's department
+    const { data: managerData, error: managerError } = await client
+      .from('users')
+      .select('department')
+      .eq('id', user.value.id)
+      .single()
+    
+    if (managerError) throw managerError
+    
+    managerDepartment.value = managerData?.department || null
+    
+    // Get all employees in the manager's department
+    const { data: departmentEmployees, error: employeeError } = await client
+      .from('users')
+      .select('id')
+      .eq('department', managerDepartment.value)
+    
+    if (employeeError) throw employeeError
+    
+    const employeeIds = departmentEmployees?.map(emp => emp.id) || []
+    
+    if (employeeIds.length === 0) {
+      years.value = [new Date().getFullYear()]
+      selectedYear.value = new Date().getFullYear()
+      return
+    }
+    
     const { data, error } = await client
       .from('claims')
       .select('date')
-      .eq('status', 'verified')
+      .eq('status', 'admin_verified')
+      .in('employee_id', employeeIds)
     
     if (error) throw error
     
@@ -162,18 +190,52 @@ const fetchReimbursementRequests = async () => {
     loading.value = true
     error.value = null
     
+    // First get the manager's department if not already set
+    if (!managerDepartment.value) {
+      const { data: managerData, error: managerError } = await client
+        .from('users')
+        .select('department')
+        .eq('id', user.value.id)
+        .single()
+      
+      if (managerError) throw managerError
+      managerDepartment.value = managerData?.department || null
+    }
+    
+    if (!managerDepartment.value) {
+      throw new Error('Manager department not found')
+    }
+    
+    // Get all employees in the manager's department
+    const { data: departmentEmployees, error: employeeError } = await client
+      .from('users')
+      .select('id')
+      .eq('department', managerDepartment.value)
+    
+    if (employeeError) throw employeeError
+    
+    const employeeIds = departmentEmployees?.map(emp => emp.id) || []
+    
+    if (employeeIds.length === 0) {
+      // No employees in department, return empty array
+      reimbursementRequests.value = []
+      applyFilters()
+      return
+    }
+    
+    // Now get admin_verified claims only for employees in the department
     const { data, error: fetchError } = await client
       .from('claims')
       .select(`
         *,
-        profiles:employee_id(first_name, last_name, department),
+        users:users!claims_employee_id_fkey(first_name, last_name, department),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
           subcategory:subcategory_id(id, subcategory_name)
         ),
-        manager_approver:manager_approved_by(first_name, last_name),
-        admin_verifier:admin_verified_by(first_name, last_name),
+        manager_approver:users!claims_manager_approved_by_fkey(first_name, last_name),
+        admin_verifier:users!claims_admin_verified_by_fkey(first_name, last_name),
         notes:claim_notes(
           id,
           note,
@@ -182,12 +244,23 @@ const fetchReimbursementRequests = async () => {
           user_id
         )
       `)
-      .eq('status', 'verified')
+      .eq('status', 'admin_verified')
+      .in('employee_id', employeeIds)
       .order('date', { ascending: false })
     
     if (fetchError) throw fetchError
     
-    reimbursementRequests.value = data || []
+    // Additional client-side safety filter to ensure we only have department employees
+    const departmentClaims = (data || []).filter(claim => {
+      // Ensure the user data exists and belongs to the correct department
+      return claim.users && claim.users.department === managerDepartment.value
+    })
+    
+    reimbursementRequests.value = departmentClaims
+    
+    console.log('Filtered verified claims count:', departmentClaims.length)
+    console.log('Manager department:', managerDepartment.value)
+    
     applyFilters()
   } catch (err) {
     console.error('Error fetching claims:', err)
@@ -200,8 +273,13 @@ const fetchReimbursementRequests = async () => {
 // Apply filters to reimbursement requests
 const applyFilters = () => {
   filteredRequests.value = reimbursementRequests.value.filter(request => {
-    // Only show verified requests instead of pending
-    if (request.status !== 'verified') {
+    // Additional safety check - ensure user data exists and is from correct department
+    if (!request.users || request.users.department !== managerDepartment.value) {
+      return false
+    }
+    
+    // Only show admin_verified requests
+    if (request.status !== 'admin_verified') {
       return false
     }
     
@@ -221,7 +299,7 @@ const applyFilters = () => {
     
     // Employee name filter
     if (filters.value.employeeName) {
-      const fullName = `${request.profiles?.first_name} ${request.profiles?.last_name}`.toLowerCase()
+      const fullName = `${request.users.first_name} ${request.users.last_name}`.toLowerCase()
       if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
         return false
       }
@@ -258,10 +336,21 @@ const organizedData = computed(() => {
   
   filteredRequests.value.forEach(request => {
     const employeeId = request.employee_id
-    const employeeName = request.profiles ? 
-      `${request.profiles.first_name} ${request.profiles.last_name}` : 
-      'Unknown Employee'
-    const employeeDept = request.profiles?.department || 'Unknown Department'
+    
+    // Skip if user data is missing or invalid
+    if (!request.users || !request.users.first_name || !request.users.last_name) {
+      console.warn('Skipping request with missing user data:', request.id)
+      return
+    }
+    
+    // Additional safety check for department
+    if (request.users.department !== managerDepartment.value) {
+      console.warn('Skipping request from different department:', request.id)
+      return
+    }
+    
+    const employeeName = `${request.users.first_name} ${request.users.last_name}`
+    const employeeDept = request.users.department
     
     if (!organized[employeeId]) {
       organized[employeeId] = {
@@ -628,7 +717,7 @@ const monthlyClaimStatus = computed(() => {
     status[index] = undefined
   })
   
-  // Only process claims for the selected year
+  // Only process claims for the selected year and department employees
   reimbursementRequests.value.forEach(request => {
     const date = new Date(request.date)
     if (date.getFullYear() === selectedYear.value) {
@@ -721,14 +810,25 @@ const getTotalNotes = (request) => {
   return request.notes?.length || 0
 }
 
+// Add the managerDepartment ref after other refs
+const managerDepartment = ref<string | null>(null)
+
 // Initialize
 onMounted(async () => {
   try {
     loading.value = true
+    // Ensure fetchAvailableYears runs first to set managerDepartment.value
     await fetchAvailableYears()
     await fetchCategories()
     await fetchReimbursementRequests()
     await fetchUserRole()
+    
+    // Set all employees expanded by default
+    if (sortedEmployeeKeys.value) {
+      sortedEmployeeKeys.value.forEach(employeeId => {
+        expandedEmployees.value[employeeId] = true
+      })
+    }
   } catch (err) {
     console.error('Error during initialization:', err)
     error.value = 'Failed to initialize the page'

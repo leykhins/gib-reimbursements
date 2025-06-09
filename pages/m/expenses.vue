@@ -49,6 +49,9 @@ const categories = ref([])
 const viewingReceipt = ref(false)
 const currentReceiptUrl = ref('')
 
+// This is correct: Declare managerDepartment as a ref globally
+const managerDepartment = ref<string | null>(null)
+
 // Expanded sections tracking
 const expandedEmployees = ref({})
 const expandedCategories = ref({})
@@ -108,12 +111,14 @@ const fetchAvailableYears = async () => {
     
     if (managerError) throw managerError
     
-    const managerDepartment = managerData?.department
+    // Assign to the global ref here, not a local constant
+    managerDepartment.value = managerData?.department || null
     
     const { data, error } = await client
       .from('claims')
       .select('date, users:employee_id(department)')
-      .eq('users.department', managerDepartment)
+      // Use the global ref's value here
+      .eq('users.department', managerDepartment.value)
     
     if (error) throw error
     
@@ -149,12 +154,12 @@ const fetchCategories = async () => {
       .from('claim_categories')
       .select(`
         id,
-        category_name as name,
+        category_name,
         claim_subcategories:category_subcategory_mapping(
           subcategory_id,
           subcategory:subcategory_id(
             id, 
-            subcategory_name as name
+            subcategory_name
           )
         )
       `)
@@ -165,10 +170,10 @@ const fetchCategories = async () => {
     // Transform the data to match the expected format
     const transformedCategories = categoryData?.map(category => ({
       id: category.id,
-      name: category.name,
+      name: category.category_name,
       expense_subcategories: category.claim_subcategories?.map(mapping => ({
         id: mapping.subcategory?.id,
-        name: mapping.subcategory?.name
+        name: mapping.subcategory?.subcategory_name
       })) || []
     })) || []
     
@@ -198,14 +203,37 @@ const fetchReimbursementRequests = async () => {
     
     if (managerError) throw managerError
     
-    const managerDepartment = managerData?.department
+    // Assign to the global ref here
+    managerDepartment.value = managerData?.department || null
+    console.log('Manager Department:', managerDepartment.value)
     
-    // Then get all expenses for employees in that department
+    if (!managerDepartment.value) {
+      throw new Error('Manager department not found')
+    }
+    
+    // Get all employees in the manager's department first
+    const { data: departmentEmployees, error: employeeError } = await client
+      .from('users')
+      .select('id')
+      .eq('department', managerDepartment.value)
+    
+    if (employeeError) throw employeeError
+    
+    const employeeIds = departmentEmployees?.map(emp => emp.id) || []
+    
+    if (employeeIds.length === 0) {
+      // No employees in department, return empty array
+      reimbursementRequests.value = []
+      applyFilters()
+      return
+    }
+    
+    // Now get claims only for employees in the department
     const { data, error: fetchError } = await client
       .from('claims')
       .select(`
         *,
-        users!claims_employee_id_fkey(first_name, last_name, department),
+        users:users!claims_employee_id_fkey(first_name, last_name, department),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
@@ -221,12 +249,22 @@ const fetchReimbursementRequests = async () => {
           user_id
         )
       `)
-      .eq('users.department', managerDepartment)
+      .in('employee_id', employeeIds)
       .order('date', { ascending: false })
     
     if (fetchError) throw fetchError
     
-    reimbursementRequests.value = data || []
+    // Additional client-side safety filter to ensure we only have department employees
+    const departmentClaims = (data || []).filter(claim => {
+      // Ensure the user data exists and belongs to the correct department
+      return claim.users && claim.users.department === managerDepartment.value
+    })
+    
+    reimbursementRequests.value = departmentClaims
+    
+    console.log('Filtered claims count:', departmentClaims.length)
+    console.log('Manager department:', managerDepartment.value)
+    
     applyFilters()
   } catch (err) {
     console.error('Error fetching claims:', err)
@@ -243,6 +281,11 @@ const applyFilters = () => {
     const requestMonth = requestDate.getMonth()
     const requestYear = requestDate.getFullYear()
     
+    // Additional safety check - ensure user data exists and is from correct department
+    if (!request.users || request.users.department !== managerDepartment.value) {
+      return false
+    }
+
     // Month/Year filter
     if (requestMonth !== selectedMonth.value || requestYear !== selectedYear.value) {
       return false
@@ -255,7 +298,7 @@ const applyFilters = () => {
     
     // Employee name filter
     if (filters.value.employeeName) {
-      const fullName = `${request.users?.first_name} ${request.users?.last_name}`.toLowerCase()
+      const fullName = `${request.users.first_name} ${request.users.last_name}`.toLowerCase()
       if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
         return false
       }
@@ -283,17 +326,27 @@ const applyFilters = () => {
   })
 }
 
-
 // Organize data by employee and job number
 const organizedData = computed(() => {
   const organized = {}
   
   filteredRequests.value.forEach(request => {
     const employeeId = request.employee_id
-    const employeeName = request.users ? 
-      `${request.users.first_name} ${request.users.last_name}` : 
-      'Unknown Employee'
-    const employeeDept = request.users?.department || 'Unknown Department'
+    
+    // Skip if user data is missing or invalid
+    if (!request.users || !request.users.first_name || !request.users.last_name) {
+      console.warn('Skipping request with missing user data:', request.id)
+      return
+    }
+    
+    // Additional safety check for department
+    if (request.users.department !== managerDepartment.value) {
+      console.warn('Skipping request from different department:', request.id)
+      return
+    }
+    
+    const employeeName = `${request.users.first_name} ${request.users.last_name}`
+    const employeeDept = request.users.department
     
     if (!organized[employeeId]) {
       organized[employeeId] = {
@@ -780,9 +833,16 @@ const getTotalNotes = (request) => {
   return request.notes?.length || 0
 }
 
+// Add this after the other watch statements
+watch(filteredRequests, (newRequests) => {
+  console.log('Filtered requests updated:', newRequests)
+  console.log('Sample request user data:', newRequests?.[0]?.users)
+}, { deep: true })
+
 // Initialize
 onMounted(async () => {
-  await fetchAvailableYears()
+  // Ensure fetchAvailableYears runs first to set managerDepartment.value
+  await fetchAvailableYears() 
   await fetchCategories()
   await fetchReimbursementRequests()
   await fetchUserRole()
@@ -808,7 +868,7 @@ onMounted(async () => {
           <SelectTrigger class="h-8 w-full">
             <div class="flex items-center">
               <CalendarIcon class="w-4 h-4 mr-2" />
-              <SelectValue :placeholder="selectedYear" />
+              <SelectValue :placeholder="String(selectedYear)" />
             </div>
           </SelectTrigger>
           <SelectContent>

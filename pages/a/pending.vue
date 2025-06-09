@@ -173,6 +173,7 @@ const fetchReimbursementRequests = async () => {
       .from('claims')
       .select(`
         *,
+        users:users!claims_employee_id_fkey(first_name, last_name, department),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
@@ -227,7 +228,7 @@ const applyFilters = () => {
     
     // Employee name filter
     if (filters.value.employeeName) {
-      const fullName = `${request.profiles?.first_name} ${request.profiles?.last_name}`.toLowerCase()
+      const fullName = `${request.users?.first_name} ${request.users?.last_name}`.toLowerCase()
       if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
         return false
       }
@@ -264,10 +265,15 @@ const organizedData = computed(() => {
   
   filteredRequests.value.forEach(request => {
     const employeeId = request.employee_id
-    const employeeName = request.profiles ? 
-      `${request.profiles.first_name} ${request.profiles.last_name}` : 
-      'Unknown Employee'
-    const employeeDept = request.profiles?.department || 'Unknown Department'
+    
+    // Skip if user data is missing or invalid
+    if (!request.users || !request.users.first_name || !request.users.last_name) {
+      console.warn('Skipping request with missing user data:', request.id)
+      return
+    }
+    
+    const employeeName = `${request.users.first_name} ${request.users.last_name}`
+    const employeeDept = request.users.department || 'Unknown Department'
     
     if (!organized[employeeId]) {
       organized[employeeId] = {
