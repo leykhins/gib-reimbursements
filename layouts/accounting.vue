@@ -111,8 +111,8 @@ useHead({
           :class="[
             'flex items-center rounded-md px-3 py-2 text-responsive-sm font-medium',
             $route.path === item.path
-              ? 'bg-primary/10 text-primary'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              ? 'bg-secondary/20 text-secondary border-l-4 border-secondary'
+              : 'text-muted-foreground hover:bg-secondary/20 hover:text-secondary'
           ]"
         >
           <component :is="item.icon" class="mr-3 h-5 w-5" />
@@ -122,7 +122,7 @@ useHead({
     </aside>
     
     <!-- Main Content -->
-    <div class="flex flex-1 flex-col overflow-hidden">
+    <div class="flex flex-1 flex-col overflow-hidden bg-muted">
       <TopNav :toggleSidebar="toggleSidebar" />
       <main class="flex-1 overflow-y-auto p-6">
         <slot />

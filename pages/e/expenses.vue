@@ -508,8 +508,8 @@ onMounted(async () => {
                   v-for="(month, index) in months" 
                   :key="index"
                   :class="[
-                    'px-2 py-1 whitespace-nowrap text-sm shrink-0',
-                    selectedMonth === index ? 'bg-primary text-primary-foreground rounded-md' : 'hover:bg-secondary'
+                    'px-2 py-1 whitespace-nowrap text-sm shrink-0 rounded-md',
+                    selectedMonth === index ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary hover:text-white'
                   ]"
                   @click="changeMonth(index)"
                 >
@@ -654,7 +654,7 @@ onMounted(async () => {
                   leave-to-class="opacity-0 max-h-0 overflow-hidden"
                 >
                   <div v-if="expandedJobs[`${categoryId}-${jobNumber}`]" class="border-t">
-                    <Table>
+                    <Table class="bg-white">
                       <TableHeader>
                         <TableRow class="bg-muted/50 hover:bg-muted/50">
                           <TableHead class="uppercase text-xs font-medium text-muted-foreground">Date</TableHead>

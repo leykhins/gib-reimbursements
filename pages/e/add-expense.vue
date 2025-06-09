@@ -260,10 +260,40 @@ const showField = computed(() => (expenseId: number, fieldName: string) => {
   }
 })
 
-// Calculate the mileage amount automatically
-const calculateMileageAmount = (distance: string) => {
+// Helper function to check if location includes Vancouver
+const isVancouverLocation = (startLocation: string, destination: string): boolean => {
+  if (!startLocation && !destination) return false
+  const start = startLocation?.toLowerCase() || ''
+  const dest = destination?.toLowerCase() || ''
+  return start.includes('vancouver') || dest.includes('vancouver')
+}
+
+// Calculate the mileage amount automatically with Vancouver bonus
+const calculateMileageAmount = (distance: string, startLocation?: string, destination?: string) => {
   if (!distance || isNaN(parseFloat(distance))) return '0.00'
-  return (parseFloat(distance) * MILEAGE_RATE).toFixed(2)
+  
+  let amount = parseFloat(distance) * MILEAGE_RATE
+  
+  // Add 2% extra if location includes Vancouver
+  if (startLocation && destination && isVancouverLocation(startLocation, destination)) {
+    amount = amount * 1.02
+  }
+  
+  return amount.toFixed(2)
+}
+
+// Calculate mileage amount for a specific entry
+const calculateMileageAmountForEntry = (distance: string, startLocation: string, destination: string): string => {
+  if (!distance || isNaN(parseFloat(distance))) return '0.00'
+  
+  let amount = parseFloat(distance) * MILEAGE_RATE
+  
+  // Add 2% extra if location includes Vancouver
+  if (isVancouverLocation(startLocation, destination)) {
+    amount = amount * 1.02
+  }
+  
+  return amount.toFixed(2)
 }
 
 // Update amount when distance changes for car mileage
@@ -484,7 +514,8 @@ const confirmSubmit = async () => {
             return; // Skip entries with no distance
           }
           
-          const amount = (parseFloat(entry.distance) * MILEAGE_RATE).toFixed(2);
+          // Calculate amount with Vancouver bonus if applicable
+          const amount = calculateMileageAmountForEntry(entry.distance, entry.startLocation, entry.destination);
           
           // Truncate addresses for description
           const shortStartLocation = truncateAddress(entry.startLocation);
@@ -492,6 +523,11 @@ const confirmSubmit = async () => {
           
           // Build a basic description with truncated addresses
           let description = `Mileage: ${shortStartLocation} to ${shortDestination}`;
+          
+          // Add Vancouver bonus indicator to description if applicable
+          if (isVancouverLocation(entry.startLocation, entry.destination)) {
+            description += ' (Vancouver +2%)';
+          }
           
           // Add job number to description if it exists and should be shown
           if (shouldShowJobNumber(entry.subcategoryMappingId) && entry.jobNumber) {
@@ -901,14 +937,24 @@ const calculateTotalDistance = (expenseId: number) => {
   return total.toFixed(2)
 }
 
-// Update the mileage totals and calculate amount
+// Update the mileage totals and calculate amount with Vancouver bonus
 const updateMileageTotals = (expenseId: number) => {
   const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
   if (expenseIndex === -1) return
   
+  const expense = expenses.value[expenseIndex]
+  if (!expense.mileageEntries) return
+  
+  // Calculate total amount for all entries, including Vancouver bonus
+  const totalAmount = expense.mileageEntries.reduce((sum, entry) => {
+    if (!entry.distance || parseFloat(entry.distance) <= 0) return sum
+    const entryAmount = parseFloat(calculateMileageAmountForEntry(entry.distance, entry.startLocation, entry.destination))
+    return sum + entryAmount
+  }, 0)
+  
   const totalDistance = calculateTotalDistance(expenseId)
   expenses.value[expenseIndex].distance = totalDistance
-  expenses.value[expenseIndex].amount = (parseFloat(totalDistance) * MILEAGE_RATE).toFixed(2)
+  expenses.value[expenseIndex].amount = totalAmount.toFixed(2)
 }
 
 // Add string date handling for simpler input
