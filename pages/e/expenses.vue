@@ -179,9 +179,7 @@ const organizedData = computed(() => {
     }
     
     organized[categoryId].jobs[jobNumber].claims.push(claim)
-    const totalAmount = (parseFloat(claim.amount) || 0) + 
-                       (parseFloat(claim.gst_amount) || 0) + 
-                       (parseFloat(claim.pst_amount) || 0)
+    const totalAmount = parseFloat(claim.amount) || 0
     organized[categoryId].jobs[jobNumber].total += totalAmount
     organized[categoryId].total += totalAmount
   })
@@ -454,6 +452,18 @@ const submitClaim = async (claimData) => {
   }
 }
 
+// Add computed properties for footer totals
+const totalExpensesCount = computed(() => {
+  return filteredRequests.value.length
+})
+
+const grandTotal = computed(() => {
+  return filteredRequests.value.reduce((sum, claim) => {
+    const amount = parseFloat(claim.amount) || 0
+    return sum + amount
+  }, 0).toFixed(2)
+})
+
 // Initialize
 onMounted(async () => {
   await fetchAvailableYears()
@@ -470,7 +480,7 @@ onMounted(async () => {
     
     <!-- Month navigation tabs -->
     <div class="flex flex-col lg:flex-row items-stretch lg:items-center text-responsive-base gap-2">
-      <div class="w-full lg:w-32 text-sm">
+      <div class="w-full bg-white lg:w-32 text-sm">
         <Select v-model="selectedYear">
           <SelectTrigger class="h-8 w-full">
             <div class="flex items-center">
@@ -633,7 +643,16 @@ onMounted(async () => {
                   @click="toggleJob(categoryId, jobNumber)"
                 >
                   <div class="text-sm font-medium">
-                    Job #{{ jobNumber }}
+                    <span 
+                      v-if="organizedData[categoryId].jobs[jobNumber].claims[0]?.job_number"
+                    >
+                      Job #{{ organizedData[categoryId].jobs[jobNumber].claims[0].job_number }}
+                    </span>
+                    <span 
+                      v-else-if="organizedData[categoryId].jobs[jobNumber].claims[0]?.license_number"
+                    >
+                      License #{{ organizedData[categoryId].jobs[jobNumber].claims[0].license_number }}
+                    </span>
                   </div>
                   <div class="flex items-center space-x-4">
                     <div class="text-sm">
@@ -722,8 +741,8 @@ onMounted(async () => {
       </div>
     </div>
     
-    <!-- Receipt Viewer Dialog -->
-    <Dialog v-model:open="viewingReceipt">
+       <!-- Receipt Viewer Dialog -->
+       <Dialog v-model:open="viewingReceipt">
       <DialogContent class="max-w-4xl">
         <DialogHeader>
           <DialogTitle>Receipt</DialogTitle>
@@ -749,6 +768,49 @@ onMounted(async () => {
         </div>
       </DialogContent>
     </Dialog>
+
+    <!-- Footer with expense totals -->
+    <div class="fixed bottom-0 right-0 lg:left-64 left-0 bg-white border-t shadow-lg p-4 z-40">
+      <div class="max-w-7xl mx-auto">
+        <!-- Desktop View -->
+        <div class="hidden md:flex items-center justify-between">
+          <!-- Summary Section -->
+          <div class="flex items-center space-x-6">
+            <div class="text-sm text-gray-500">
+              {{ months[selectedMonth] }} {{ selectedYear }}
+            </div>
+            <div>
+              <span class="text-sm text-gray-500">Total Expenses:</span>
+              <span class="ml-2 font-semibold">{{ totalExpensesCount }}</span>
+            </div>
+            <div>
+              <span class="text-sm text-gray-500">Grand Total:</span>
+              <span class="ml-2 font-bold text-primary">{{ formatCurrency(parseFloat(grandTotal)) }}</span>
+            </div>
+          </div>          
+        </div>
+
+        <!-- Mobile View -->
+        <div class="md:hidden">
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <div>
+              <span class="text-sm text-gray-500">Expenses:</span>
+              <span class="ml-1 font-semibold">{{ totalExpensesCount }}</span>
+            </div>
+            <div>
+              <span class="text-sm text-gray-500">Grand Total:</span>
+              <span class="ml-2 font-bold text-primary">{{ formatCurrency(parseFloat(grandTotal)) }}</span>
+            </div>
+          </div>
+          <div class="text-center text-sm text-gray-500">
+            {{ months[selectedMonth] }} {{ selectedYear }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add padding to the bottom of the main content to prevent overlap with fixed footer -->
+    <div class="pb-24"></div>
   </div>
 </template>
 

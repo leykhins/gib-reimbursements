@@ -997,7 +997,18 @@ const isImageReceipt = ref(false)
                         <div class="flex items-center gap-2">
                           <ChevronDown v-if="!expandedJobs[`${employeeId}-${categoryId}-${jobNumber}`]" class="h-4 w-4" />
                           <ChevronUp v-else class="h-4 w-4" />
-                          <span class="font-medium">Job #{{ jobNumber }}</span>
+                          <span 
+                            v-if="jobGroup.requests[0]?.job_number" 
+                            class="font-medium"
+                          >
+                            Job #<span class="uppercase">{{ jobGroup.requests[0].job_number }}</span>
+                          </span>
+                          <span 
+                            v-else-if="jobGroup.requests[0]?.license_number" 
+                            class="font-medium"
+                          >
+                            License #<span class="uppercase">{{ jobGroup.requests[0].license_number }}</span>
+                          </span>
                           <span class="text-sm text-muted-foreground">
                             ({{ jobGroup.requests.length }} items - Total: {{ formatCurrency(jobGroup.total) }})
                           </span>

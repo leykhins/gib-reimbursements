@@ -1251,6 +1251,7 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
                   id="jobNumber" 
                   v-model="expense.jobNumber" 
                   placeholder="Enter job number" 
+                  type="number"
                   required
                 />
               </div>
@@ -1396,6 +1397,7 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
                             :id="`jobNumber-${expense.id}-${entryIndex}`" 
                             v-model="entry.jobNumber" 
                             placeholder="Job #" 
+                            type="number"
                             required
                           />
                         </div>
