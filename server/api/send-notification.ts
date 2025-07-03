@@ -6,7 +6,12 @@ import {
   generateClaimSubmissionEmailContent,
   generateAdminVerificationEmailContent,
   generateManagerApprovalEmailContent,
-  generateClaimProcessedEmailContent
+  generateClaimProcessedEmailContent,
+  generateEmployeeVerificationEmailContent,
+  generateEmployeeApprovalEmailContent,
+  generateEmployeeSubmissionConfirmationContent,
+  formatDate,
+  formatCurrency
 } from '~/lib/notifications'
 
 export default defineEventHandler(async (event) => {
@@ -35,14 +40,24 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    if (notificationType === 'consolidated_submission') {
+    // Enhanced validation logic for different notification types
+    if (notificationType === 'consolidated_submission' || 
+        notificationType === 'employee_consolidated_submission_confirmation' ||
+        notificationType === 'consolidated_admin_verification' ||
+        notificationType === 'consolidated_employee_verification' ||
+        notificationType === 'consolidated_manager_approval' ||
+        notificationType === 'consolidated_employee_approval' ||
+        notificationType === 'consolidated_processing_complete' ||
+        notificationType === 'consolidated_rejection') {
       if (!claimIds || !claimsDetails || !htmlContent) {
         throw createError({
           statusCode: 400,
-          statusMessage: 'Required fields for consolidated submission are missing'
+          statusMessage: 'Required fields for consolidated notification are missing'
         })
       }
-    } else {
+    } else if (notificationType !== 'admin_rejection_notice' && 
+               notificationType !== 'manager_rejection_notice' && 
+               notificationType !== 'accounting_rejection_notice') {
       if (!claimId || !claimDetails) {
         throw createError({
           statusCode: 400,
@@ -71,6 +86,19 @@ export default defineEventHandler(async (event) => {
         subject = 'New Reimbursement Claim Submitted'
         break
         
+      case 'employee_submission_confirmation':
+        emailHtmlContent = generateEmployeeSubmissionConfirmationContent(
+          recipientName,
+          claimDetails
+        )
+        subject = 'Claim Submitted Successfully'
+        break
+        
+      case 'employee_consolidated_submission_confirmation':
+        emailHtmlContent = body.htmlContent
+        subject = 'Claims Submitted Successfully'
+        break
+        
       case 'admin_verification':
         emailHtmlContent = generateAdminVerificationEmailContent(
           recipientName,
@@ -78,6 +106,14 @@ export default defineEventHandler(async (event) => {
           employeeName
         )
         subject = 'Reimbursement Claim Verified by Admin'
+        break
+        
+      case 'employee_verification':
+        emailHtmlContent = generateEmployeeVerificationEmailContent(
+          recipientName,
+          claimDetails
+        )
+        subject = 'Your Reimbursement Claim Has Been Verified'
         break
         
       case 'manager_approval':
@@ -89,6 +125,14 @@ export default defineEventHandler(async (event) => {
         subject = 'Reimbursement Claim Approved by Manager'
         break
         
+      case 'employee_approval':
+        emailHtmlContent = generateEmployeeApprovalEmailContent(
+          recipientName,
+          claimDetails
+        )
+        subject = 'Your Reimbursement Claim Has Been Approved'
+        break
+        
       case 'rejection':
         emailHtmlContent = generateRejectionEmailContent(
           recipientName,
@@ -96,6 +140,39 @@ export default defineEventHandler(async (event) => {
           rejectionReason
         )
         subject = 'Your Reimbursement Claim Has Been Rejected'
+        break
+        
+      case 'admin_rejection_notice':
+      case 'manager_rejection_notice':
+      case 'accounting_rejection_notice':
+        emailHtmlContent = `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #e11d48;">Claim Rejection Notice</h2>
+            <p>Hello ${recipientName || 'there'},</p>
+            <p>A reimbursement claim from ${employeeName} has been rejected by ${rejectorName}.</p>
+            
+            <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+              <h3 style="margin-top: 0;">Claim Details</h3>
+              <p><strong>Date:</strong> ${formatDate(claimDetails.date)}</p>
+              <p><strong>Description:</strong> ${claimDetails.description}</p>
+              <p><strong>Amount:</strong> ${formatCurrency(claimDetails.amount)}</p>
+              <p><strong>Category:</strong> ${claimDetails.category_name} - ${claimDetails.subcategory_name}</p>
+              ${claimDetails.job_number ? `<p><strong>Job Number:</strong> ${claimDetails.job_number}</p>` : ''}
+            </div>
+            
+            <div style="background-color: #fee2e2; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #e11d48;">
+              <h3 style="margin-top: 0; color: #e11d48;">Rejection Reason</h3>
+              <p>${rejectionReason || 'No specific reason provided.'}</p>
+            </div>
+            
+            <p>This is for your information. The employee has been notified of the rejection.</p>
+            
+            <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
+              <p>This is an automated notification from the GibClaim System.</p>
+            </div>
+          </div>
+        `
+        subject = `Claim Rejection Notice - ${employeeName}`
         break
         
       case 'consolidated_submission':
@@ -111,10 +188,20 @@ export default defineEventHandler(async (event) => {
         subject = 'Your Reimbursement Claim Has Been Processed'
         break
         
+      case 'consolidated_admin_verification':
+      case 'consolidated_employee_verification':
+      case 'consolidated_manager_approval':
+      case 'consolidated_employee_approval':
+      case 'consolidated_processing_complete':
+      case 'consolidated_rejection':
+        emailHtmlContent = body.htmlContent
+        subject = getConsolidatedSubject(notificationType, claimsDetails?.length || 0)
+        break
+        
       default:
         throw createError({
           statusCode: 400,
-          statusMessage: 'Invalid notification type'
+          statusMessage: `Invalid notification type: ${notificationType}`
         })
     }
     
@@ -131,7 +218,14 @@ export default defineEventHandler(async (event) => {
     // Log to supabase notifications table for record keeping
     const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey)
     
-    if (notificationType === 'consolidated_submission') {
+    if (notificationType === 'consolidated_submission' || 
+        notificationType === 'employee_consolidated_submission_confirmation' ||
+        notificationType === 'consolidated_admin_verification' ||
+        notificationType === 'consolidated_employee_verification' ||
+        notificationType === 'consolidated_manager_approval' ||
+        notificationType === 'consolidated_employee_approval' ||
+        notificationType === 'consolidated_processing_complete' ||
+        notificationType === 'consolidated_rejection') {
       await Promise.all(claimIds.map(claimId => 
         supabase
           .from('email_notifications')
@@ -166,3 +260,24 @@ export default defineEventHandler(async (event) => {
     })
   }
 })
+
+function getConsolidatedSubject(notificationType: string, claimCount: number): string {
+  const claimText = claimCount === 1 ? 'Claim' : 'Claims'
+  
+  switch (notificationType) {
+    case 'consolidated_admin_verification':
+      return `${claimCount} Reimbursement ${claimText} Verified by Admin`
+    case 'consolidated_employee_verification':
+      return `Your ${claimCount} Reimbursement ${claimText} Have Been Verified`
+    case 'consolidated_manager_approval':
+      return `${claimCount} Reimbursement ${claimText} Approved by Manager`
+    case 'consolidated_employee_approval':
+      return `Your ${claimCount} Reimbursement ${claimText} Have Been Approved`
+    case 'consolidated_processing_complete':
+      return `Your ${claimCount} Reimbursement ${claimText} Have Been Processed`
+    case 'consolidated_rejection':
+      return `Your ${claimCount} Reimbursement ${claimText} Have Been Rejected`
+    default:
+      return `${claimCount} Reimbursement ${claimText} Update`
+  }
+}

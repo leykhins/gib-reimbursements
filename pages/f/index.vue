@@ -405,7 +405,7 @@
             </Table>
           </div>
           <div class="mt-4 flex justify-end">
-            <NuxtLink to="/f/process">
+            <NuxtLink to="/f/pending">
               <Button variant="outline" size="sm" class="text-xs">View All Pending Requests</Button>
             </NuxtLink>
           </div>

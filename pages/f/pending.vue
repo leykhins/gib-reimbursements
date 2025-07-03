@@ -81,6 +81,9 @@ const noteDialogOpen = ref(false)
 const newNote = ref('')
 const selectedClaim = ref(null)
 const userRole = ref('')
+const verifyingRequestIds = ref(new Set())
+const isVerifying = ref(false)
+const isRejecting = ref(false)
 
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
@@ -495,7 +498,6 @@ const verifySelectedRequests = async (requestId) => {
 const confirmVerification = async () => {
   try {
     isVerifying.value = true
-    // Add all requests being verified to the tracking set
     verifyingRequests.value.forEach(id => verifyingRequestIds.value.add(id))
     
     const promises = verifyingRequests.value.map(async (id) => {
@@ -510,14 +512,6 @@ const confirmVerification = async () => {
           .eq('id', id)
         
         if (updateError) throw updateError
-        
-        // Send notification
-        try {
-          const { sendClaimProcessedEmail } = await import('~/lib/notifications')
-          await sendClaimProcessedEmail(id)
-        } catch (emailError) {
-          console.error('Failed to send email notification:', emailError)
-        }
       } finally {
         verifyingRequestIds.value.delete(id)
       }
@@ -525,8 +519,21 @@ const confirmVerification = async () => {
     
     await Promise.all(promises)
     
+    // Send notifications - consolidated if multiple, individual if single
+    try {
+      if (verifyingRequests.value.length > 1) {
+        const { sendConsolidatedProcessingCompleteEmail } = await import('~/lib/notifications')
+        await sendConsolidatedProcessingCompleteEmail(verifyingRequests.value)
+      } else {
+        const { sendClaimProcessedEmail } = await import('~/lib/notifications')
+        await sendClaimProcessedEmail(verifyingRequests.value[0])
+      }
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError)
+    }
+    
     // Show success modal
-    successMessage.value = `Successfully processed ${verifyingRequests.value.length} request${verifyingRequests.value.length > 1 ? 's' : ''}`
+    successMessage.value = `Successfully verified ${verifyingRequests.value.length} request${verifyingRequests.value.length > 1 ? 's' : ''}`
     showSuccessModal.value = true
     showVerifyModal.value = false
     
@@ -534,10 +541,10 @@ const confirmVerification = async () => {
     selectedRequests.value.clear()
     await fetchReimbursementRequests()
   } catch (err) {
-    console.error('Error processing requests:', err)
+    console.error('Error verifying requests:', err)
     toast({
       title: 'Error',
-      description: 'Failed to process some requests',
+      description: 'Failed to verify some requests',
       variant: 'destructive'
     })
     showVerifyModal.value = false

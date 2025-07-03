@@ -594,12 +594,10 @@ const verifySelectedRequests = async (requestId) => {
 const confirmVerification = async () => {
   try {
     isVerifying.value = true
-    // Add all requests being verified to the tracking set
     verifyingRequests.value.forEach(id => verifyingRequestIds.value.add(id))
     
     const promises = verifyingRequests.value.map(async (id) => {
       try {
-        // Update the claim status
         const { error: updateError } = await client
           .from('claims')
           .update({
@@ -610,22 +608,25 @@ const confirmVerification = async () => {
           .eq('id', id)
         
         if (updateError) throw updateError
-        
-        // Send notification to accountant
-        try {
-          const { getAccountantDetails, sendManagerApprovalEmail } = await import('~/lib/notifications')
-          const accountantDetails = await getAccountantDetails(client)
-          await sendManagerApprovalEmail(id, accountantDetails.email, accountantDetails.name)
-        } catch (emailError) {
-          console.error('Failed to send email notification:', emailError)
-        }
       } finally {
-        // Remove the request from tracking regardless of success/failure
         verifyingRequestIds.value.delete(id)
       }
     })
     
     await Promise.all(promises)
+    
+    // Send notifications - consolidated if multiple, individual if single
+    try {
+      if (verifyingRequests.value.length > 1) {
+        const { sendConsolidatedManagerApprovalEmail } = await import('~/lib/notifications')
+        await sendConsolidatedManagerApprovalEmail(verifyingRequests.value)
+      } else {
+        const { sendEnhancedManagerApprovalEmail } = await import('~/lib/notifications')
+        await sendEnhancedManagerApprovalEmail(verifyingRequests.value[0])
+      }
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError)
+    }
     
     // Show success modal
     successMessage.value = `Successfully approved ${verifyingRequests.value.length} request${verifyingRequests.value.length > 1 ? 's' : ''}`
@@ -645,7 +646,6 @@ const confirmVerification = async () => {
     showVerifyModal.value = false
   } finally {
     isVerifying.value = false
-    // Clear any remaining IDs from tracking
     verifyingRequestIds.value.clear()
   }
 }
