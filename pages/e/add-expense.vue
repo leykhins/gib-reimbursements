@@ -610,10 +610,10 @@ const confirmSubmit = async () => {
       submittedClaimIds.push(expenseResult.id)
     }
     
-    // Send a single consolidated notification for all claims
+    // Send a single consolidated notification for all claims to admins AND employee
     try {
-      const { sendConsolidatedClaimSubmissionEmail } = await import('~/lib/notifications')
-      await sendConsolidatedClaimSubmissionEmail(submittedClaimIds)
+      const { sendEnhancedConsolidatedClaimSubmissionEmail } = await import('~/lib/notifications')
+      await sendEnhancedConsolidatedClaimSubmissionEmail(submittedClaimIds)
     } catch (emailError) {
       console.error('Failed to send email notification:', emailError)
       // Continue even if email fails - the claims are still submitted

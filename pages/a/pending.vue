@@ -513,24 +513,10 @@ const verifySelectedRequests = async (requestId) => {
 const confirmVerification = async () => {
   try {
     isVerifying.value = true
-    // Add all requests being verified to the tracking set
     verifyingRequests.value.forEach(id => verifyingRequestIds.value.add(id))
     
     const promises = verifyingRequests.value.map(async (id) => {
       try {
-        // Get the claim details first
-        const { data: claimData, error: claimError } = await client
-          .from('claims')
-          .select(`
-            employee_id,
-            users!claims_employee_id_fkey(department)
-          `)
-          .eq('id', id)
-          .single()
-        
-        if (claimError) throw claimError
-        
-        // Update the claim status
         const { error: updateError } = await client
           .from('claims')
           .update({
@@ -541,22 +527,25 @@ const confirmVerification = async () => {
           .eq('id', id)
         
         if (updateError) throw updateError
-        
-        // Send notification to manager
-        try {
-          const { getManagerDetails, sendAdminVerificationEmail } = await import('~/lib/notifications')
-          const managerDetails = await getManagerDetails(client, claimData.users.department)
-          await sendAdminVerificationEmail(id, managerDetails.email, managerDetails.name)
-        } catch (emailError) {
-          console.error('Failed to send email notification:', emailError)
-        }
       } finally {
-        // Remove the request from tracking regardless of success/failure
         verifyingRequestIds.value.delete(id)
       }
     })
     
     await Promise.all(promises)
+    
+    // Send notifications - consolidated if multiple, individual if single
+    try {
+      if (verifyingRequests.value.length > 1) {
+        const { sendConsolidatedAdminVerificationEmail } = await import('~/lib/notifications')
+        await sendConsolidatedAdminVerificationEmail(verifyingRequests.value)
+      } else {
+        const { sendEnhancedAdminVerificationEmail } = await import('~/lib/notifications')
+        await sendEnhancedAdminVerificationEmail(verifyingRequests.value[0])
+      }
+    } catch (emailError) {
+      console.error('Failed to send email notification:', emailError)
+    }
     
     // Show success modal
     successMessage.value = `Successfully verified ${verifyingRequests.value.length} request${verifyingRequests.value.length > 1 ? 's' : ''}`
@@ -576,7 +565,6 @@ const confirmVerification = async () => {
     showVerifyModal.value = false
   } finally {
     isVerifying.value = false
-    // Clear any remaining IDs from tracking
     verifyingRequestIds.value.clear()
   }
 }
@@ -645,8 +633,8 @@ const confirmRejection = async () => {
     
     // Send email notification
     try {
-      const { sendClaimRejectionEmail } = await import('~/lib/notifications')
-      await sendClaimRejectionEmail(
+      const { sendEnhancedClaimRejectionEmail } = await import('~/lib/notifications')
+      await sendEnhancedClaimRejectionEmail(
         rejectingRequestId.value,
         user.value.id,
         rejectionReason.value
