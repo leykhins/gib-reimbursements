@@ -26,7 +26,7 @@
         </div>
       </CardContent>
       <CardFooter>
-        <NuxtLink to="/login">
+        <NuxtLink to="/">
           <Button variant="link" class="p-0">
             Return to Login
           </Button>

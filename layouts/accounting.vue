@@ -43,7 +43,7 @@ const closeSidebar = () => {
 // Check if current user is an accountant
 const checkAccountantStatus = async () => {
   if (!user.value) {
-    navigateTo('/login')
+    navigateTo('/')
     return
   }
   

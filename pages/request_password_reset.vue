@@ -44,7 +44,7 @@
         </Alert>
       </CardContent>
       <CardFooter>
-        <NuxtLink to="/login">
+        <NuxtLink to="/">
           <Button variant="link" class="p-0">
             Back to Login
           </Button>

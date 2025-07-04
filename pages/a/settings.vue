@@ -122,7 +122,7 @@ const profileError = ref(false)
 // Redirect if not logged in
 onMounted(async () => {
   if (!user.value) {
-    navigateTo('/login')
+    navigateTo('/')
   } else {
     // Fetch user profile data from public.users
     const { data, error } = await client

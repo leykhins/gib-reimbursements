@@ -130,7 +130,7 @@
       
       // Redirect to login after a delay
       setTimeout(() => {
-        navigateTo('/login')
+        navigateTo('/')
       }, 2000)
     } catch (e) {
       error.value = e.message

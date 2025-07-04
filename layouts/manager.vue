@@ -43,7 +43,7 @@ const closeSidebar = () => {
 // Check if current user is a manager or admin
 const checkManagerStatus = async () => {
   if (!user.value) {
-    navigateTo('/login')
+    navigateTo('/')
     return
   }
   

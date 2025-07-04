@@ -89,7 +89,7 @@
       </CardContent>
       <CardFooter>
         <div class="text-center w-full text-sm">
-          <NuxtLink to="/login">
+          <NuxtLink to="/">
             <Button variant="link" class="p-0">
               Already have an account? Login
             </Button>

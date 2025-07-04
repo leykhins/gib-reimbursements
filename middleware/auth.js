@@ -12,7 +12,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
       description: 'Please log in to access this page',
       variant: 'destructive'
     })
-    return navigateTo('/login')
+    return navigateTo('/')
   }
   
   // If user and on login page, redirect to employee dashboard
