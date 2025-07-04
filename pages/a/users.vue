@@ -71,7 +71,6 @@ import {
   PaginationContent,
   PaginationEllipsis,
   PaginationItem,
-  PaginationLink,
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
@@ -133,8 +132,8 @@ const inviteLoadingMessage = ref('')
 const inviteSuccessMessage = ref('')
 const inviteErrorMessage = ref('')
 
-// Department filter state
-const selectedDepartments = ref([])
+// Department filter state - change from array to single value
+const selectedDepartment = ref('')
 
 // Admin navigation items
 const adminNavItems = [
@@ -227,10 +226,10 @@ const filteredUsers = computed(() => {
     )
   }
   
-  // Filter by departments
-  if (selectedDepartments.value.length > 0) {
+  // Filter by department - updated logic
+  if (selectedDepartment.value && selectedDepartment.value !== '' && selectedDepartment.value !== 'all') {
     filtered = filtered.filter(user => 
-      selectedDepartments.value.includes(user.department)
+      user.department === selectedDepartment.value
     )
   }
   
@@ -252,7 +251,6 @@ const totalPages = computed(() => {
 // Generate array of page numbers for pagination
 const paginationItems = computed(() => {
   const items = []
-  const showEllipsis = totalPages.value > 7
   
   if (totalPages.value <= 7) {
     // Show all pages if 7 or fewer
@@ -297,6 +295,9 @@ const resetPagination = () => {
 
 // Watch for search changes to reset pagination
 watch(searchQuery, resetPagination)
+
+// Watch for department filter changes to reset pagination
+watch(selectedDepartment, resetPagination)
 
 // Pagination controls
 const goToPage = (page: number) => {
@@ -725,20 +726,10 @@ const sendInvitations = async () => {
   }
 }
 
-// Clear all filters
+// Clear all filters - updated
 const clearFilters = () => {
-  selectedDepartments.value = []
+  selectedDepartment.value = 'all'
   searchQuery.value = ''
-}
-
-// Toggle department filter
-const toggleDepartment = (department: string) => {
-  const index = selectedDepartments.value.indexOf(department)
-  if (index > -1) {
-    selectedDepartments.value.splice(index, 1)
-  } else {
-    selectedDepartments.value.push(department)
-  }
 }
 
 // Initialize component
@@ -769,67 +760,40 @@ definePageMeta({
               <Input
                 v-model="searchQuery"
                 placeholder="Search users..."
-                class="pl-8 bg-white"
+                class="pl-8 bg-white shadow-none"
               />
             </div>
-            
-            <!-- Department Filter Popover -->
-            <Popover>
-              <PopoverTrigger as-child>
-                <Button variant="outline" size="icon" class="relative">
-                  <Filter class="h-4 w-4" />
-                  <span v-if="selectedDepartments.length > 0" 
-                        class="absolute -top-1 -right-1 h-3 w-3 bg-primary rounded-full text-[10px] text-primary-foreground flex items-center justify-center">
-                    {{ selectedDepartments.length }}
+
+            <div class="relative w-64">
+              <Select v-model="selectedDepartment">
+                <SelectTrigger class="bg-white pl-24 shadow-none">
+                  <span class="absolute left-3 top-2 text-sm text-muted-foreground pointer-events-none">
+                    Department:
                   </span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent class="w-56" align="start">
-                <div class="space-y-3">
-                  <div class="flex items-center justify-between">
-                    <h4 class="font-medium">Filter by Department</h4>
-                    <Button v-if="selectedDepartments.length > 0" 
-                            variant="ghost" 
-                            size="sm" 
-                            @click="selectedDepartments = []"
-                            class="h-auto p-1 text-xs">
-                      Clear
-                    </Button>
-                  </div>
-                  
-                  <div class="space-y-2">
-                    <div v-for="department in availableDepartments" 
-                         :key="department" 
-                         class="flex items-center space-x-2">
-                      <Checkbox 
-                        :id="department"
-                        :checked="selectedDepartments.includes(department)"
-                        @update:checked="toggleDepartment(department)"
-                      />
-                      <label :for="department" 
-                             class="text-sm font-normal cursor-pointer flex-1">
-                        {{ department }}
-                      </label>
-                    </div>
-                    
-                    <div v-if="availableDepartments.length === 0" 
-                         class="text-sm text-muted-foreground">
-                      No departments found
-                    </div>
-                  </div>
-                  
-                  <div v-if="selectedDepartments.length > 0" 
-                       class="pt-2 border-t">
-                    <Button variant="ghost" 
-                            size="sm" 
-                            @click="clearFilters" 
-                            class="w-full text-xs">
-                      Clear All Filters
-                    </Button>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
+                  <SelectValue placeholder="All" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem 
+                    v-for="department in availableDepartments" 
+                    :key="department" 
+                    :value="department"
+                  >
+                    {{ department }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <Button 
+              v-if="(selectedDepartment && selectedDepartment !== 'all') || searchQuery" 
+              variant="outline" 
+              size="sm" 
+              @click="clearFilters"
+              class="ml-2"
+            >
+              Clear Filters
+            </Button>
           </div>
           
           <div class="flex gap-2">
@@ -847,7 +811,7 @@ definePageMeta({
         <div class="rounded-md border bg-white px-6 py-2">
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow class="uppercase text-muted-foreground">
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
@@ -881,19 +845,19 @@ definePageMeta({
                 </TableCell>
                 <TableCell>{{ user.department || '-' }}</TableCell>
                 <TableCell>${{ (user.mileage_rate || 0.61).toFixed(2) }}/km</TableCell>
-                <TableCell>{{ new Date(user.created_at).toLocaleDateString() }}</TableCell>
+                <TableCell>{{ new Date(user.created_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) }}</TableCell>
                 <TableCell>
                   <div class="flex justify-end gap-2">
-                    <Button variant="outline" size="icon" @click="editUser(user)">
+                    <Button class="shadow-none" variant="outline" size="icon" @click="editUser(user)">
                       <PenLine class="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="icon" @click="changePassword(user)">
+                    <Button class="shadow-none" variant="outline" size="icon" @click="changePassword(user)">
                       <Key class="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="icon" @click="assignManager(user)">
+                    <Button class="shadow-none" variant="outline" size="icon" @click="assignManager(user)">
                       <UserCog class="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="icon" @click="deleteUser(user.id)">
+                    <Button class="shadow-none" variant="outline" size="icon" @click="deleteUser(user.id)">
                       <Trash2 class="h-4 w-4" />
                     </Button>
                   </div>
@@ -916,31 +880,33 @@ definePageMeta({
             </p>
           </div>
           
-          <Pagination v-if="totalPages > 1" :total="filteredUsers.length" :items-per-page="itemsPerPage" :default-page="currentPage">
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious @click="prevPage" :disabled="currentPage === 1" />
-              </PaginationItem>
-              
-              <template v-for="(item, index) in paginationItems" :key="index">
-                <PaginationItem v-if="item.type === 'page'">
-                  <PaginationLink 
-                    @click="goToPage(item.value)"
-                    :is-active="item.value === currentPage"
+          <div>
+              <Pagination 
+              v-slot="{ page }" 
+              :items-per-page="itemsPerPage" 
+              :total="filteredUsers.length" 
+              :default-page="currentPage"
+              @update:page="currentPage = $event"
+            >
+              <PaginationContent v-slot="{ items }">
+                <PaginationPrevious />
+
+                <template v-for="(item, index) in items" :key="index">
+                  <PaginationItem
+                    v-if="item.type === 'page'"
+                    :value="item.value"
+                    :is-active="item.value === page"
+                    :class="item.value === page ? 'bg-black text-white hover:bg-black hover:text-white' : ''"
                   >
                     {{ item.value }}
-                  </PaginationLink>
-                </PaginationItem>
-                <PaginationItem v-else-if="item.type === 'ellipsis'">
-                  <PaginationEllipsis />
-                </PaginationItem>
-              </template>
-              
-              <PaginationItem>
-                <PaginationNext @click="nextPage" :disabled="currentPage === totalPages" />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
+                  </PaginationItem>
+                  <PaginationEllipsis v-else :index="index" />
+                </template>
+
+                <PaginationNext />
+              </PaginationContent>
+            </Pagination>
+          </div>
         </div>
       </main>
     </div>
