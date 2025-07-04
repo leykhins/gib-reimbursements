@@ -115,7 +115,7 @@ const getDashboardItems = () => {
 // Logout function
 const handleLogout = async () => {
   await client.auth.signOut()
-  navigateTo('/login')
+  navigateTo('/')
 }
 </script>
 

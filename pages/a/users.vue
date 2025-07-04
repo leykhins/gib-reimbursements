@@ -145,7 +145,7 @@ const adminNavItems = [
 // Check if current user is admin
 const checkAdminStatus = async () => {
   if (!user.value) {
-    navigateTo('/login')
+    navigateTo('/')
     return
   }
   

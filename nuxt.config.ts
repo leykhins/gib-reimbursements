@@ -43,7 +43,7 @@ export default defineNuxtConfig({
     url: process.env.SUPABASE_URL,
     key: process.env.SUPABASE_KEY,
     redirectOptions: {
-      login: '/login',
+      login: '/',
       callback: '/confirm',
       exclude: ['/public/*', '/reset_password', '/request_password_reset', '/signup'],
     }
