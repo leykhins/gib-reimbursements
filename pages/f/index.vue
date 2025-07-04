@@ -276,14 +276,12 @@
       <!-- Stats Cards -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
-          <CardHeader class="pb-2">
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Pending Payments</CardTitle>
+            <Clock class="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div class="flex items-center space-x-2">
-              <Clock class="h-4 w-4 text-muted-foreground" />
-              <div class="text-2xl font-bold">{{ stats.pendingPayments }}</div>
-            </div>
+            <div class="text-2xl font-bold">{{ stats.pendingPayments }}</div>
             <p class="text-xs text-muted-foreground mt-2">
               {{ formatCurrency(stats.pendingAmount) }} awaiting processing
             </p>
@@ -291,14 +289,12 @@
         </Card>
         
         <Card>
-          <CardHeader class="pb-2">
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Processed Payments</CardTitle>
+            <CheckCircle class="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div class="flex items-center space-x-2">
-              <CheckCircle class="h-4 w-4 text-muted-foreground" />
-              <div class="text-2xl font-bold">{{ stats.processedPayments }}</div>
-            </div>
+            <div class="text-2xl font-bold">{{ stats.processedPayments }}</div>
             <p class="text-xs text-muted-foreground mt-2">
               Recently processed reimbursements
             </p>
@@ -306,14 +302,12 @@
         </Card>
         
         <Card>
-          <CardHeader class="pb-2">
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Total Reimbursed</CardTitle>
+            <DollarSign class="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div class="flex items-center space-x-2">
-              <DollarSign class="h-4 w-4 text-muted-foreground" />
-              <div class="text-2xl font-bold">{{ formatCurrency(stats.totalReimbursed) }}</div>
-            </div>
+            <div class="text-2xl font-bold">{{ formatCurrency(stats.totalReimbursed) }}</div>
             <p class="text-xs text-muted-foreground mt-2">
               Total amount processed
             </p>
@@ -325,7 +319,7 @@
             <CardHeader class="pb-2">
             </CardHeader>
             <CardContent class="flex flex-col items-center justify-center">
-              <Clock class="h-6 w-6 mb-2" />
+              <Clock class="h-6 w-6 mb-2  text-orange-500" />
             </CardContent>
             <CardFooter class="flex items-center justify-center text-sm gap-2">
               <p>Process Pending Requests</p>
@@ -339,7 +333,7 @@
             <CardHeader class="pb-2">
             </CardHeader>
             <CardContent class="flex flex-col items-center justify-center">
-              <FileText class="h-6 w-6 mb-2" />
+              <FileText class="h-6 w-6 mb-2  text-orange-500" />
             </CardContent>
             <CardFooter class="flex items-center justify-center text-sm gap-2">
               <p>View All Expenses</p>

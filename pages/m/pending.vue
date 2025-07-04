@@ -847,7 +847,7 @@ onMounted(async () => {
     
     <!-- Month navigation tabs -->
     <div class="flex flex-col lg:flex-row items-stretch lg:items-center text-responsive-base gap-2">
-      <div class="w-full lg:w-32 text-sm">
+      <div class="w-full bg-white lg:w-32 text-sm">
         <Select v-model="selectedYear">
           <SelectTrigger class="h-8 w-full">
             <div class="flex items-center">

@@ -7,7 +7,9 @@ import {
   CheckCircle,
   XCircle,
   Plus,
-  Loader2
+  Loader2,
+  Calendar,
+  TrendingUp
 } from 'lucide-vue-next'
 import { ref, onMounted, computed } from 'vue'
 import { Button } from '@/components/ui/button'
@@ -219,6 +221,44 @@ const formatCategory = (categoryId) => {
   if (!categoryId) return 'Uncategorized'
   return categories.value[categoryId] || 'Unknown Category'
 }
+
+// Add these computed properties after the existing ones
+const currentMonthTotal = computed(() => {
+  const now = new Date()
+  const currentMonth = now.getMonth()
+  const currentYear = now.getFullYear()
+  
+  return reimbursementRequests.value
+    .filter(request => {
+      const requestDate = new Date(request.date)
+      return requestDate.getMonth() === currentMonth && requestDate.getFullYear() === currentYear
+    })
+    .reduce((total, request) => total + request.amount, 0)
+})
+
+const lastMonthTotal = computed(() => {
+  const now = new Date()
+  const lastMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1
+  const lastMonthYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
+  
+  return reimbursementRequests.value
+    .filter(request => {
+      const requestDate = new Date(request.date)
+      return requestDate.getMonth() === lastMonth && requestDate.getFullYear() === lastMonthYear
+    })
+    .reduce((total, request) => total + request.amount, 0)
+})
+
+// Update the computed property to show amount difference
+const monthlyChangeAmount = computed(() => {
+  return currentMonthTotal.value - lastMonthTotal.value
+})
+
+const monthlyChangeText = computed(() => {
+  const amount = Math.abs(monthlyChangeAmount.value)
+  const direction = monthlyChangeAmount.value >= 0 ? '↑' : '↓'
+  return `${direction} ${formatCurrency(amount)} from last month`
+})
 </script>
 
 <template>
@@ -233,10 +273,10 @@ const formatCategory = (categoryId) => {
     </div>
     
     <!-- Stats Cards -->
-    <div class="grid gap-6 md:grid-cols-3 mb-8">
+    <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
       <!-- Loading State -->
       <template v-if="loading">
-        <Card v-for="i in 3" :key="i">
+        <Card v-for="i in 4" :key="i">
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
             <Skeleton class="h-4 w-[100px]" />
             <Skeleton class="h-4 w-4 rounded-full" />
@@ -253,7 +293,7 @@ const formatCategory = (categoryId) => {
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
             <CardTitle class="text-responsive-sm font-medium">Pending Requests</CardTitle>
-            <Clock class="h-4 w-4 text-muted-foreground" />
+            <Clock class="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
             <div class="text-responsive-2xl font-bold mb-2">{{ reimbursementRequests.filter(r => r.status === 'pending').length }}</div>
@@ -264,7 +304,7 @@ const formatCategory = (categoryId) => {
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
             <CardTitle class="text-responsive-sm font-medium">Completed</CardTitle>
-            <CheckCircle class="h-4 w-4 text-muted-foreground" />
+            <CheckCircle class="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
             <div class="text-responsive-2xl font-bold mb-2">{{ reimbursementRequests.filter(r => r.status === 'processed').length }}</div>
@@ -275,11 +315,32 @@ const formatCategory = (categoryId) => {
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
             <CardTitle class="text-responsive-sm font-medium">Rejected</CardTitle>
-            <XCircle class="h-4 w-4 text-muted-foreground" />
+            <XCircle class="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
             <div class="text-responsive-2xl font-bold mb-2">{{ reimbursementRequests.filter(r => r.status === 'rejected').length }}</div>
             <p class="text-responsive-xs text-muted-foreground">Requires revision</p>
+          </CardContent>
+        </Card>
+
+        <!-- Updated Monthly Claims Card -->
+        <Card>
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
+            <CardTitle class="text-responsive-sm font-medium">Monthly Claims</CardTitle>
+            <Calendar class="h-4 w-4 text-orange-500" />
+          </CardHeader>
+          <CardContent>
+            <div class="text-responsive-2xl font-bold mb-2">{{ formatCurrency(currentMonthTotal) }}</div>
+            <p 
+              :class="{
+                'text-red-500': monthlyChangeAmount < 0,
+                'text-green-500': monthlyChangeAmount > 0,
+                'text-muted-foreground': monthlyChangeAmount === 0
+              }"
+              class="text-responsive-xs"
+            >
+              {{ monthlyChangeText }}
+            </p>
           </CardContent>
         </Card>
       </template>

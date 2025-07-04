@@ -315,14 +315,12 @@ const getStatusClass = (status) => {
         <template v-else>
           <!-- Actual Stats Cards -->
           <Card>
-            <CardHeader class="pb-2">
+            <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle class="text-sm font-medium">Pending Payments</CardTitle>
+              <Clock class="h-4 w-4 text-orange-500" />
             </CardHeader>
             <CardContent>
-              <div class="flex items-center space-x-2">
-                <Clock class="h-4 w-4 text-muted-foreground" />
-                <div class="text-2xl font-bold">{{ stats.pendingPayments }}</div>
-              </div>
+              <div class="text-2xl font-bold">{{ stats.pendingPayments }}</div>
               <p class="text-xs text-muted-foreground mt-2">
                 {{ formatCurrency(stats.pendingAmount) }} awaiting processing
               </p>
@@ -330,14 +328,12 @@ const getStatusClass = (status) => {
           </Card>
           
           <Card>
-            <CardHeader class="pb-2">
+            <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle class="text-sm font-medium">Total Processed Payments</CardTitle>
+              <CheckCircle class="h-4 w-4 text-orange-500" />
             </CardHeader>
             <CardContent>
-              <div class="flex items-center space-x-2">
-                <CheckCircle class="h-4 w-4 text-muted-foreground" />
-                <div class="text-2xl font-bold">{{ stats.processedPayments }}</div>
-              </div>
+              <div class="text-2xl font-bold">{{ stats.processedPayments }}</div>
               <p class="text-xs text-muted-foreground mt-2">
                 {{ formatCurrency(stats.totalReimbursed) }} total reimbursed
               </p>
@@ -346,14 +342,12 @@ const getStatusClass = (status) => {
 
           <!-- Month Claims Value Card -->
           <Card>
-            <CardHeader class="pb-2">
+            <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle class="text-sm font-medium">Monthly Claims</CardTitle>
+              <DollarSign class="h-4 w-4 text-orange-500" />
             </CardHeader>
             <CardContent>
-              <div class="flex items-center space-x-2">
-                <DollarSign class="h-4 w-4 text-muted-foreground" />
-                <div class="text-2xl font-bold">{{ formatCurrency(currentMonthTotal) }}</div>
-              </div>
+              <div class="text-2xl font-bold">{{ formatCurrency(currentMonthTotal) }}</div>
               <div class="flex items-center mt-2 text-xs">
                 <span 
                   class="flex items-center gap-1"
@@ -373,14 +367,12 @@ const getStatusClass = (status) => {
 
           <!-- Rejected Claims Card -->
           <Card>
-            <CardHeader class="pb-2">
+            <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle class="text-sm font-medium">Rejected Claims</CardTitle>
+              <XCircle class="h-4 w-4 text-destructive" />
             </CardHeader>
             <CardContent>
-              <div class="flex items-center space-x-2">
-                <XCircle class="h-4 w-4 text-destructive" />
-                <div class="text-2xl font-bold">{{ stats.rejectedClaims }}</div>
-              </div>
+              <div class="text-2xl font-bold">{{ stats.rejectedClaims }}</div>
               <p class="text-xs text-muted-foreground mt-2">
                 {{ formatCurrency(stats.rejectedAmount) }} declined value
               </p>

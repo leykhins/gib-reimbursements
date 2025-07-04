@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useSupabaseClient, useSupabaseUser } from '#imports'
 import { useRouter } from 'vue-router'
 import { 
@@ -16,7 +16,10 @@ import {
   Loader2,
   CheckCircle,
   AlertCircle,
-  XIcon
+  XIcon,
+  ChevronLeft,
+  ChevronRight,
+  Filter
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -52,6 +55,25 @@ import {
   AlertTitle,
   AlertDescription
 } from '@/components/ui/alert'
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from '@/components/ui/avatar'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
 
 const client = useSupabaseClient()
 const user = useSupabaseUser()
@@ -63,6 +85,10 @@ const loading = ref(false)
 const searchQuery = ref('')
 const isAdmin = ref(false)
 
+// Pagination state
+const currentPage = ref(1)
+const itemsPerPage = 15
+
 // State for user edit dialog
 const showEditDialog = ref(false)
 const showPasswordDialog = ref(false)
@@ -72,7 +98,8 @@ const editForm = ref({
   first_name: '',
   last_name: '',
   email: '',
-  role: ''
+  role: '',
+  mileage_rate: 0.61
 })
 const passwordForm = ref({
   password: '',
@@ -104,6 +131,9 @@ const inviteLoading = ref(false)
 const inviteLoadingMessage = ref('')
 const inviteSuccessMessage = ref('')
 const inviteErrorMessage = ref('')
+
+// Department filter state - change from array to single value
+const selectedDepartment = ref('')
 
 // Admin navigation items
 const adminNavItems = [
@@ -170,19 +200,130 @@ const fetchUsers = async () => {
   }
 }
 
-// Filter users based on search query
-const filteredUsers = computed(() => {
-  if (!searchQuery.value) return users.value
-  
-  const query = searchQuery.value.toLowerCase()
-  return users.value.filter(user => 
-    user.first_name?.toLowerCase().includes(query) ||
-    user.last_name?.toLowerCase().includes(query) ||
-    user.email?.toLowerCase().includes(query) ||
-    user.role?.toLowerCase().includes(query) ||
-    user.department?.toLowerCase().includes(query)
-  )
+// Get unique departments from users
+const availableDepartments = computed(() => {
+  const departments = users.value
+    .map(user => user.department)
+    .filter(dept => dept && dept.trim() !== '')
+    .filter((dept, index, arr) => arr.indexOf(dept) === index)
+    .sort()
+  return departments
 })
+
+// Filter users based on search query and departments
+const filteredUsers = computed(() => {
+  let filtered = users.value
+  
+  // Filter by search query
+  if (searchQuery.value) {
+    const query = searchQuery.value.toLowerCase()
+    filtered = filtered.filter(user => 
+      user.first_name?.toLowerCase().includes(query) ||
+      user.last_name?.toLowerCase().includes(query) ||
+      user.email?.toLowerCase().includes(query) ||
+      user.role?.toLowerCase().includes(query) ||
+      user.department?.toLowerCase().includes(query)
+    )
+  }
+  
+  // Filter by department - updated logic
+  if (selectedDepartment.value && selectedDepartment.value !== '' && selectedDepartment.value !== 'all') {
+    filtered = filtered.filter(user => 
+      user.department === selectedDepartment.value
+    )
+  }
+  
+  return filtered
+})
+
+// Paginated users
+const paginatedUsers = computed(() => {
+  const start = (currentPage.value - 1) * itemsPerPage
+  const end = start + itemsPerPage
+  return filteredUsers.value.slice(start, end)
+})
+
+// Total pages
+const totalPages = computed(() => {
+  return Math.ceil(filteredUsers.value.length / itemsPerPage)
+})
+
+// Generate array of page numbers for pagination
+const paginationItems = computed(() => {
+  const items = []
+  
+  if (totalPages.value <= 7) {
+    // Show all pages if 7 or fewer
+    for (let i = 1; i <= totalPages.value; i++) {
+      items.push({ type: 'page', value: i })
+    }
+  } else {
+    // Complex pagination logic for many pages
+    if (currentPage.value <= 4) {
+      // Near the beginning
+      for (let i = 1; i <= 5; i++) {
+        items.push({ type: 'page', value: i })
+      }
+      items.push({ type: 'ellipsis' })
+      items.push({ type: 'page', value: totalPages.value })
+    } else if (currentPage.value >= totalPages.value - 3) {
+      // Near the end
+      items.push({ type: 'page', value: 1 })
+      items.push({ type: 'ellipsis' })
+      for (let i = totalPages.value - 4; i <= totalPages.value; i++) {
+        items.push({ type: 'page', value: i })
+      }
+    } else {
+      // In the middle
+      items.push({ type: 'page', value: 1 })
+      items.push({ type: 'ellipsis' })
+      for (let i = currentPage.value - 1; i <= currentPage.value + 1; i++) {
+        items.push({ type: 'page', value: i })
+      }
+      items.push({ type: 'ellipsis' })
+      items.push({ type: 'page', value: totalPages.value })
+    }
+  }
+  
+  return items
+})
+
+// Reset to first page when search changes
+const resetPagination = () => {
+  currentPage.value = 1
+}
+
+// Watch for search changes to reset pagination
+watch(searchQuery, resetPagination)
+
+// Watch for department filter changes to reset pagination
+watch(selectedDepartment, resetPagination)
+
+// Pagination controls
+const goToPage = (page: number) => {
+  if (page >= 1 && page <= totalPages.value) {
+    currentPage.value = page
+  }
+}
+
+const nextPage = () => {
+  if (currentPage.value < totalPages.value) {
+    currentPage.value++
+  }
+}
+
+const prevPage = () => {
+  if (currentPage.value > 1) {
+    currentPage.value--
+  }
+}
+
+// Generate user initials for avatar fallback
+const getUserInitials = (user: any) => {
+  const firstName = user.first_name || ''
+  const lastName = user.last_name || ''
+  return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
+}
 
 // Open edit dialog for a user
 const editUser = (user) => {
@@ -191,7 +332,8 @@ const editUser = (user) => {
     first_name: user.first_name || '',
     last_name: user.last_name || '',
     email: user.email || '',
-    role: user.role || 'user'
+    role: user.role || 'user',
+    mileage_rate: user.mileage_rate || 0.61
   }
   showEditDialog.value = true
 }
@@ -207,6 +349,7 @@ const saveUserEdits = async () => {
         first_name: editForm.value.first_name,
         last_name: editForm.value.last_name,
         role: editForm.value.role,
+        mileage_rate: parseFloat(editForm.value.mileage_rate),
         updated_at: new Date()
       })
       .eq('id', selectedUser.value.id)
@@ -583,6 +726,12 @@ const sendInvitations = async () => {
   }
 }
 
+// Clear all filters - updated
+const clearFilters = () => {
+  selectedDepartment.value = 'all'
+  searchQuery.value = ''
+}
+
 // Initialize component
 onMounted(async () => {
   await checkAdminStatus()
@@ -598,21 +747,55 @@ definePageMeta({
 </script>
 
 <template>
-  <div class="flex h-screen overflow-hidden">
+  <div class="flex flex-1 flex-col">
     
     <!-- Main Content -->
-    <div class="flex flex-1 flex-col overflow-hidden">
-      <main class="flex-1 overflow-y-auto p-6">
+    <div class="flex flex-1 flex-col">
+      <main class="flex-1">
         <!-- User Management Section -->
         <div class="mb-6 flex justify-between items-center">
-          <div class="relative w-64">
-            <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              v-model="searchQuery"
-              placeholder="Search users..."
-              class="pl-8"
-            />
+          <div class="flex items-center gap-2">
+            <div class="relative w-64">
+              <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                v-model="searchQuery"
+                placeholder="Search users..."
+                class="pl-8 bg-white shadow-none"
+              />
+            </div>
+
+            <div class="relative w-64">
+              <Select v-model="selectedDepartment">
+                <SelectTrigger class="bg-white pl-24 shadow-none">
+                  <span class="absolute left-3 top-2 text-sm text-muted-foreground pointer-events-none">
+                    Department:
+                  </span>
+                  <SelectValue placeholder="All" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem 
+                    v-for="department in availableDepartments" 
+                    :key="department" 
+                    :value="department"
+                  >
+                    {{ department }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <Button 
+              v-if="(selectedDepartment && selectedDepartment !== 'all') || searchQuery" 
+              variant="outline" 
+              size="sm" 
+              @click="clearFilters"
+              class="ml-2"
+            >
+              Clear Filters
+            </Button>
           </div>
+          
           <div class="flex gap-2">
             <Button @click="openInviteDialog" variant="default">
               <UserPlus class="mr-2 h-4 w-4" />
@@ -625,27 +808,35 @@ definePageMeta({
           </div>
         </div>
         
-        <div class="rounded-md border">
+        <div class="rounded-md border bg-white px-6 py-2">
           <Table>
-            <TableCaption>List of all users in the system</TableCaption>
             <TableHeader>
-              <TableRow>
+              <TableRow class="uppercase text-muted-foreground">
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Department</TableHead>
+                <TableHead>Mileage Rate</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead class="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="user in filteredUsers" :key="user.id">
-                <TableCell>{{ user.first_name }} {{ user.last_name }}</TableCell>
+              <TableRow v-for="user in paginatedUsers" :key="user.id">
+                <TableCell>
+                  <div class="flex items-center gap-3">
+                    <Avatar size="sm" shape="circle" class="text-white">
+                      <AvatarImage :src="user.avatar_url" :alt="`${user.first_name} ${user.last_name}`" />
+                      <AvatarFallback>{{ getUserInitials(user) }}</AvatarFallback>
+                    </Avatar>
+                    <span class="font-medium">{{ user.first_name }} {{ user.last_name }}</span>
+                  </div>
+                </TableCell>
                 <TableCell>{{ user.email }}</TableCell>
                 <TableCell>
                   <span 
                     :class="[
-                      'px-2 py-1 rounded-full text-xs font-medium',
+                      'px-2 py-1 rounded-full text-xs font-medium capitalize',
                       user.role === 'admin' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
                     ]"
                   >
@@ -653,31 +844,69 @@ definePageMeta({
                   </span>
                 </TableCell>
                 <TableCell>{{ user.department || '-' }}</TableCell>
-                <TableCell>{{ new Date(user.created_at).toLocaleDateString() }}</TableCell>
-                <TableCell class="text-right">
+                <TableCell>${{ (user.mileage_rate || 0.61).toFixed(2) }}/km</TableCell>
+                <TableCell>{{ new Date(user.created_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) }}</TableCell>
+                <TableCell>
                   <div class="flex justify-end gap-2">
-                    <Button variant="ghost" size="icon" @click="editUser(user)">
+                    <Button class="shadow-none" variant="outline" size="icon" @click="editUser(user)">
                       <PenLine class="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" @click="changePassword(user)">
+                    <Button class="shadow-none" variant="outline" size="icon" @click="changePassword(user)">
                       <Key class="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" @click="assignManager(user)">
+                    <Button class="shadow-none" variant="outline" size="icon" @click="assignManager(user)">
                       <UserCog class="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" @click="deleteUser(user.id)">
+                    <Button class="shadow-none" variant="outline" size="icon" @click="deleteUser(user.id)">
                       <Trash2 class="h-4 w-4" />
                     </Button>
                   </div>
                 </TableCell>
               </TableRow>
-              <TableRow v-if="filteredUsers.length === 0">
-                <TableCell colspan="5" class="text-center py-4">
+              <TableRow v-if="paginatedUsers.length === 0">
+                <TableCell colspan="7" class="text-center py-4">
                   {{ loading ? 'Loading users...' : 'No users found' }}
                 </TableCell>
               </TableRow>
             </TableBody>
           </Table>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="flex items-center justify-between space-x-2 py-4">
+          <div class="flex items-center space-x-2">
+            <p class="text-sm text-muted-foreground">
+              Showing {{ ((currentPage - 1) * itemsPerPage) + 1 }} to {{ Math.min(currentPage * itemsPerPage, filteredUsers.length) }} of {{ filteredUsers.length }} users
+            </p>
+          </div>
+          
+          <div>
+              <Pagination 
+              v-slot="{ page }" 
+              :items-per-page="itemsPerPage" 
+              :total="filteredUsers.length" 
+              :default-page="currentPage"
+              @update:page="currentPage = $event"
+            >
+              <PaginationContent v-slot="{ items }">
+                <PaginationPrevious />
+
+                <template v-for="(item, index) in items" :key="index">
+                  <PaginationItem
+                    v-if="item.type === 'page'"
+                    :value="item.value"
+                    :is-active="item.value === page"
+                    :class="item.value === page ? 'bg-black text-white hover:bg-black hover:text-white' : ''"
+                  >
+                    {{ item.value }}
+                  </PaginationItem>
+                  <PaginationEllipsis v-else :index="index" />
+                </template>
+
+                <PaginationNext />
+              </PaginationContent>
+            </Pagination>
+          </div>
         </div>
       </main>
     </div>
@@ -718,6 +947,18 @@ definePageMeta({
               <SelectItem value="manager">Manager</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+        <div class="grid grid-cols-4 items-center gap-4">
+          <label class="text-right">Mileage Rate ($/km)</label>
+          <Input 
+            v-model="editForm.mileage_rate" 
+            type="number" 
+            step="0.01" 
+            min="0" 
+            max="10"
+            class="col-span-3" 
+            placeholder="0.61"
+          />
         </div>
       </div>
       <DialogFooter>
