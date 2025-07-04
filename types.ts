@@ -4,6 +4,7 @@ export interface User {
   full_name: string;
   department: string;
   role: 'employee' | 'admin' | 'manager' | 'accounting';
+  mileage_rate?: number;
   created_at: string;
   updated_at: string;
 }

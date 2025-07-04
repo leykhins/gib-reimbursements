@@ -190,7 +190,7 @@
   <div class="flex h-screen overflow-hidden">
     <!-- Main Content -->
     <div class="flex flex-1 flex-col overflow-hidden">
-      <main class="flex-1 overflow-y-auto p-6">
+      <main class="flex-1 overflow-y-auto">
         <!-- Dashboard Overview -->
         <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
           <template v-if="loading">
@@ -215,7 +215,7 @@
             <Card>
               <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle class="text-responsive-sm font-medium">Total Users</CardTitle>
-                <Users class="h-4 w-4 text-muted-foreground" />
+                <Users class="h-4 w-4 text-orange-500" />
               </CardHeader>
               <CardContent>
                 <div class="text-responsive-2xl font-bold">{{ stats.totalUsers }}</div>
@@ -226,7 +226,7 @@
             <Card>
               <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle class="text-responsive-sm font-medium">Pending Requests</CardTitle>
-                <Clock class="h-4 w-4 text-muted-foreground" />
+                <Clock class="h-4 w-4 text-orange-500" />
               </CardHeader>
               <CardContent>
                 <div class="text-responsive-2xl font-bold">{{ stats.pendingRequests }}</div>
@@ -237,7 +237,7 @@
             <Card>
               <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle class="text-responsive-sm font-medium">Approved</CardTitle>
-                <CheckCircle class="h-4 w-4 text-muted-foreground" />
+                <CheckCircle class="h-4 w-4 text-orange-500" />
               </CardHeader>
               <CardContent>
                 <div class="text-responsive-2xl font-bold">{{ stats.approvedRequests }}</div>
@@ -248,7 +248,7 @@
             <Card>
               <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle class="text-responsive-sm font-medium">Rejected</CardTitle>
-                <XCircle class="h-4 w-4 text-muted-foreground" />
+                <XCircle class="h-4 w-4 text-orange-500" />
               </CardHeader>
               <CardContent>
                 <div class="text-responsive-2xl font-bold">{{ stats.rejectedRequests }}</div>

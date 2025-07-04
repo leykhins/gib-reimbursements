@@ -49,8 +49,31 @@ const receiptPaths = ref<Record<number, string>>({})
 // Get the runtime config
 const config = useRuntimeConfig()
 
+// Add a ref to store the user's mileage rate
+const userMileageRate = ref(0.61) // Default fallback
+
+// Add function to fetch user's mileage rate
+const fetchUserMileageRate = async () => {
+  if (!user.value) return
+  
+  try {
+    const { data, error } = await client
+      .from('users')
+      .select('mileage_rate')
+      .eq('id', user.value.id)
+      .single()
+    
+    if (error) throw error
+    
+    userMileageRate.value = data.mileage_rate || 0.61
+  } catch (error) {
+    console.error('Error fetching user mileage rate:', error)
+    // Keep default rate on error
+  }
+}
+
 // Define constants for mileage calculation
-const MILEAGE_RATE = 0.61 // $0.61 per kilometer
+// const MILEAGE_RATE = 0.61 // Remove this line
 
 // Add Google Maps API configuration - use API key from environment
 const GOOGLE_MAPS_API_KEY = config.public.googleMapsApiKey || ''
@@ -201,8 +224,20 @@ const fetchCategories = async () => {
 }
 
 // Call the fetch function when component mounts
-onMounted(() => {
+onMounted(async () => {
+  await fetchUserMileageRate() // Fetch user's rate first
   fetchCategories()
+  
+  if (!window.google) {
+    const script = document.createElement('script')
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
+    script.async = true
+    script.defer = true
+    script.onload = initGoogleMaps
+    document.head.appendChild(script)
+  } else {
+    initGoogleMaps()
+  }
 })
 
 // Computed property to get subcategories for selected category
@@ -268,11 +303,11 @@ const isVancouverLocation = (startLocation: string, destination: string): boolea
   return start.includes('vancouver') || dest.includes('vancouver')
 }
 
-// Calculate the mileage amount automatically with Vancouver bonus
+// Update the calculation functions to use the user's rate
 const calculateMileageAmount = (distance: string, startLocation?: string, destination?: string) => {
   if (!distance || isNaN(parseFloat(distance))) return '0.00'
   
-  let amount = parseFloat(distance) * MILEAGE_RATE
+  let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
   
   // Add 2% extra if location includes Vancouver
   if (startLocation && destination && isVancouverLocation(startLocation, destination)) {
@@ -282,11 +317,10 @@ const calculateMileageAmount = (distance: string, startLocation?: string, destin
   return amount.toFixed(2)
 }
 
-// Calculate mileage amount for a specific entry
 const calculateMileageAmountForEntry = (distance: string, startLocation: string, destination: string): string => {
   if (!distance || isNaN(parseFloat(distance))) return '0.00'
   
-  let amount = parseFloat(distance) * MILEAGE_RATE
+  let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
   
   // Add 2% extra if location includes Vancouver
   if (isVancouverLocation(startLocation, destination)) {
@@ -1496,7 +1530,7 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
                         readonly
                         class="bg-gray-100 font-bold"
                       />
-                      <p class="text-xs text-gray-500">Based on $0.61/km</p>
+                      <p class="text-xs text-gray-500">Based on ${{ userMileageRate.toFixed(2) }}/km</p>
                     </div>
                   </div>
                 </div>

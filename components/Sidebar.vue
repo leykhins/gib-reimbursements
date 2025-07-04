@@ -3,14 +3,10 @@ import { ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   Home, 
-  Users, 
-  FileText, 
-  Calendar, 
-  Settings,
   CircleDollarSign,
   UserRoundCog,
-  BarChart3,
-  X
+  X,
+  FilePlus2
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 
@@ -18,6 +14,7 @@ const route = useRoute()
 
 const navItems = [
   { name: 'Dashboard', icon: Home, path: '/e/' },
+  { name: 'Add Expense', icon: FilePlus2, path: '/e/add-expense' },
   { name: 'Expenses', icon: CircleDollarSign, path: '/e/expenses' },
   { name: 'Settings', icon: UserRoundCog, path: '/e/settings' },
 ]
