@@ -99,3 +99,11 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Remove shadows from cards only */
+@layer utilities {
+  .card,
+  [class*="card"] {
+    box-shadow: none !important;
+  }
+}

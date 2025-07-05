@@ -21,6 +21,7 @@ import {
   today,
   parseDate
 } from '@internationalized/date'
+import heic2any from 'heic2any'
 
 // Add showConfirmModal ref
 const showConfirmModal = ref(false)
@@ -410,16 +411,49 @@ const removeExpense = async (id: number) => {
   }
 }
 
-// Handle file selection and immediate upload
+// Add this helper function to convert HEIC files
+const convertHeicToJpeg = async (file: File): Promise<File> => {
+  if (file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
+    try {
+      const convertedBlob = await heic2any({
+        blob: file,
+        toType: 'image/jpeg',
+        quality: 0.8
+      })
+      
+      // Create a new File object with the converted blob
+      const convertedFile = new File(
+        [convertedBlob as Blob], 
+        file.name.replace(/\.(heic|heif)$/i, '.jpg'),
+        { type: 'image/jpeg' }
+      )
+      
+      return convertedFile
+    } catch (error) {
+      console.error('Error converting HEIC file:', error)
+      throw new Error('Failed to convert HEIC file. Please try again.')
+    }
+  }
+  
+  return file
+}
+
+// Update the handleFileUpload function
 const handleFileUpload = async (event: Event, expenseId: number) => {
   const input = event.target as HTMLInputElement
   if (input.files && input.files.length > 0) {
     const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
     if (expenseIndex !== -1) {
-      expenses.value[expenseIndex].receipt = input.files[0]
-      
-      // Start upload immediately
-      await uploadFile(input.files[0], expenseId)
+      try {
+        // Convert HEIC to JPEG if needed
+        const convertedFile = await convertHeicToJpeg(input.files[0])
+        expenses.value[expenseIndex].receipt = convertedFile
+        
+        // Start upload immediately
+        await uploadFile(convertedFile, expenseId)
+      } catch (error) {
+        error.value = error.message
+      }
     }
   }
 }
@@ -1069,8 +1103,14 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
     const file = files[0]
     const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
     if (expenseIndex !== -1) {
-      expenses.value[expenseIndex].receipt = file
-      await uploadFile(file, expenseId)
+      try {
+        // Convert HEIC to JPEG if needed
+        const convertedFile = await convertHeicToJpeg(file)
+        expenses.value[expenseIndex].receipt = convertedFile
+        await uploadFile(convertedFile, expenseId)
+      } catch (error) {
+        error.value = error.message
+      }
     }
   }
 }
@@ -1093,7 +1133,7 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
       </div>
       
       <div v-if="categoriesLoading" class="space-y-6">
-        <Card class="mb-6">
+        <Card class="mb-6 shadow-none">
           <CardHeader class="flex flex-row items-center justify-between">
             <div class="space-y-2">
               <Skeleton class="h-6 w-[150px]" />
@@ -1144,7 +1184,7 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
 
       <div v-else class="space-y-6">
         <!-- Expense forms -->
-        <Card v-for="(expense, index) in expenses" :key="expense.id" class="mb-6">
+        <Card v-for="(expense, index) in expenses" :key="expense.id" class="mb-6 shadow-none">
           <CardHeader class="flex flex-row items-center justify-between">
             <div>
               <CardTitle>Expense #{{ index + 1 }}</CardTitle>
@@ -1559,7 +1599,7 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
                     type="file" 
                     :id="`receipt-${expense.id}`" 
                     class="hidden" 
-                    accept="image/*,.pdf" 
+                    accept="image/*,.pdf,.heic,.heif" 
                     @change="(e) => handleFileUpload(e, expense.id)"
                     required
                   />

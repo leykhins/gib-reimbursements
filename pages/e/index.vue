@@ -290,7 +290,7 @@ const monthlyChangeText = computed(() => {
 
       <!-- Loaded State -->
       <template v-else>
-        <Card>
+        <Card class="shadow-none">
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
             <CardTitle class="text-responsive-sm font-medium">Pending Requests</CardTitle>
             <Clock class="h-4 w-4 text-orange-500" />
@@ -301,7 +301,7 @@ const monthlyChangeText = computed(() => {
           </CardContent>
         </Card>
         
-        <Card>
+        <Card class="shadow-none">
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
             <CardTitle class="text-responsive-sm font-medium">Completed</CardTitle>
             <CheckCircle class="h-4 w-4 text-orange-500" />
@@ -312,7 +312,7 @@ const monthlyChangeText = computed(() => {
           </CardContent>
         </Card>
         
-        <Card>
+        <Card class="shadow-none">
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
             <CardTitle class="text-responsive-sm font-medium">Rejected</CardTitle>
             <XCircle class="h-4 w-4 text-orange-500" />
@@ -324,7 +324,7 @@ const monthlyChangeText = computed(() => {
         </Card>
 
         <!-- Updated Monthly Claims Card -->
-        <Card>
+        <Card class="shadow-none">
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-4">
             <CardTitle class="text-responsive-sm font-medium">Monthly Claims</CardTitle>
             <Calendar class="h-4 w-4 text-orange-500" />
@@ -347,7 +347,7 @@ const monthlyChangeText = computed(() => {
     </div>
     
     <!-- Main Table Card -->
-    <Card>
+    <Card class="shadow-none">
       <CardHeader>
         <CardTitle class="text-base">Reimbursement History</CardTitle>
         <CardDescription class="text-xs">Your recent expense submissions</CardDescription>
