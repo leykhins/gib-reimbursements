@@ -173,7 +173,7 @@ onMounted(async () => {
       error.value = 'No email found in the invitation link. Please contact your administrator.'
     }
   } catch (e) {
-    console.error('Error processing invitation link:', e)
+    console.error('Error processing invitation link')
     error.value = 'Error processing invitation link. Please contact your administrator.'
   }
 })
@@ -228,7 +228,7 @@ const handleSignUp = async () => {
       .eq('email', email.value)
     
     if (userUpdateError) {
-      console.error('Error updating user profile:', userUpdateError)
+      console.error('Error updating user profile')
       // Don't throw here to avoid blocking the sign-up process if just the profile update fails
     }
     

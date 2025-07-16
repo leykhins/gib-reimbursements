@@ -215,11 +215,10 @@ const fetchReimbursementRequests = async () => {
     })
     
     reimbursementRequests.value = validClaims
-    console.log('Valid claims loaded:', validClaims.length)
     
     applyFilters()
   } catch (err) {
-    console.error('Error fetching claims:', err)
+    console.error('Error fetching claims')
     error.value = err.message
   } finally {
     loading.value = false
@@ -288,7 +287,6 @@ const organizedData = computed(() => {
     
     // Skip if user data is missing or invalid (should not happen due to filtering above)
     if (!request.users || !request.users.first_name || !request.users.last_name) {
-      console.warn('Skipping request with missing user data:', request.id)
       return
     }
     

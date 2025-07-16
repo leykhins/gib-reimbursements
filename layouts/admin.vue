@@ -58,9 +58,8 @@ const checkAdminStatus = async () => {
     isAdmin.value = data.role === 'admin'
     
     // Remove the redirection logic - let middleware handle this
-    console.log('User role in admin layout:', data.role, 'isAdmin:', isAdmin.value)
   } catch (error) {
-    console.error('Error checking admin status:', error)
+    console.error('Error checking admin status')
     // Don't redirect here either
   }
 }

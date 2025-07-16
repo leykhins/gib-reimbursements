@@ -210,7 +210,6 @@ const fetchReimbursementRequests = async () => {
     
     // Assign to the global ref here
     managerDepartment.value = managerData?.department || null
-    console.log('Manager Department:', managerDepartment.value)
     
     if (!managerDepartment.value) {
       throw new Error('Manager department not found')
@@ -267,12 +266,9 @@ const fetchReimbursementRequests = async () => {
     
     reimbursementRequests.value = departmentClaims
     
-    console.log('Filtered claims count:', departmentClaims.length)
-    console.log('Manager department:', managerDepartment.value)
-    
     applyFilters()
   } catch (err) {
-    console.error('Error fetching claims:', err)
+    console.error('Error fetching claims')
     error.value = err.message
   } finally {
     loading.value = false
@@ -340,13 +336,11 @@ const organizedData = computed(() => {
     
     // Skip if user data is missing or invalid
     if (!request.users || !request.users.first_name || !request.users.last_name) {
-      console.warn('Skipping request with missing user data:', request.id)
       return
     }
     
     // Additional safety check for department
     if (request.users.department !== managerDepartment.value) {
-      console.warn('Skipping request from different department:', request.id)
       return
     }
     

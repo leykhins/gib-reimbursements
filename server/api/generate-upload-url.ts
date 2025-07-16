@@ -36,10 +36,10 @@ export default defineEventHandler(async (event) => {
       key: key
     }
   } catch (error) {
-    console.error('Error generating signed URL:', error)
+    console.error('Error generating signed URL')
     throw createError({
       statusCode: 500,
-      statusMessage: `Failed to generate upload URL: ${error.message}`
+      statusMessage: 'Failed to generate upload URL'
     })
   }
 }) 

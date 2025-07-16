@@ -53,15 +53,15 @@ export default defineEventHandler(async (event) => {
     
     if (insertError) {
       // If user table insert fails, log but don't fail the entire operation
-      console.error('Error inserting user record:', insertError)
+      console.error('Error inserting user record')
     }
     
     return { success: true, message: 'Invitation sent successfully' }
   } catch (error) {
-    console.error('Error sending invitation:', error)
+    console.error('Error sending invitation')
     throw createError({
       statusCode: 500,
-      statusMessage: `Failed to send invitation: ${error.message}`
+      statusMessage: 'Failed to send invitation'
     })
   }
 }) 

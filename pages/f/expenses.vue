@@ -1016,14 +1016,13 @@ const generateEmployeePDF = (employeeId) => {
     }
 
     // Use pdfMake to generate the PDF
-    console.log("Generating PDF with pdfMake:", $pdfMake);
     const fileName = `${employee.name.replace(/\s+/g, '_')}_Expenses_${monthName}_${yearStr}.pdf`
     $pdfMake.createPdf(docDefinition).download(fileName)
   } catch (err) {
-    console.error('PDF generation error:', err)
+    console.error('PDF generation error')
     toast({
       title: 'Error',
-      description: 'Failed to generate PDF: ' + err.message,
+      description: 'Failed to generate PDF',
       variant: 'destructive'
     })
   }
