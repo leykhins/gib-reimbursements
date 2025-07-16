@@ -53,10 +53,10 @@ export default defineEventHandler(async (event) => {
       url: urlData.publicUrl
     }
   } catch (error) {
-    console.error('Error uploading to Supabase Storage:', error)
+    console.error('Error uploading to Supabase Storage')
     throw createError({
       statusCode: 500,
-      statusMessage: `Failed to upload file: ${error.message}`
+      statusMessage: 'Failed to upload file'
     })
   }
 })

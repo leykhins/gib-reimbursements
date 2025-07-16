@@ -155,10 +155,13 @@ const fetchCategories = async () => {
       .select(`
         id,
         category_name,
-        claim_subcategories:category_subcategory_mapping(
-          subcategory_id,
-          subcategory:subcategory_id(
-            id, 
+        category_subcategory_mapping!inner (
+          id,
+          requires_job_number,
+          requires_employee_name,
+          requires_client_info,
+          subcategory:claim_subcategories (
+            id,
             subcategory_name
           )
         )
@@ -167,17 +170,19 @@ const fetchCategories = async () => {
     
     if (categoryError) throw categoryError
     
-    // Transform the data to match the expected format
-    const transformedCategories = categoryData?.map(category => ({
+    // Transform the data to match the expected structure
+    categories.value = categoryData?.map(category => ({
       id: category.id,
       name: category.category_name,
-      expense_subcategories: category.claim_subcategories?.map(mapping => ({
-        id: mapping.subcategory?.id,
-        name: mapping.subcategory?.subcategory_name
-      })) || []
+      expense_subcategories: category.category_subcategory_mapping.map(mapping => ({
+        id: mapping.subcategory.id,
+        name: mapping.subcategory.subcategory_name,
+        mapping_id: mapping.id,
+        requires_job_number: mapping.requires_job_number,
+        requires_employee_name: mapping.requires_employee_name,
+        requires_client_info: mapping.requires_client_info
+      }))
     })) || []
-    
-    categories.value = transformedCategories
   } catch (err) {
     console.error('Error fetching categories:', err)
     toast({
@@ -832,12 +837,6 @@ const saveNote = async () => {
 const getTotalNotes = (request) => {
   return request.notes?.length || 0
 }
-
-// Add this after the other watch statements
-watch(filteredRequests, (newRequests) => {
-  console.log('Filtered requests updated:', newRequests)
-  console.log('Sample request user data:', newRequests?.[0]?.users)
-}, { deep: true })
 
 // Initialize
 onMounted(async () => {

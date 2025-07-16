@@ -82,31 +82,23 @@
     
     loading.value = true
     try {
-      console.log("Fetching user count...");
       // Fetch user count
       const { count, error: countError } = await client
         .from('users')
         .select('*', { count: 'exact', head: true })
       
-      console.log("User count response:", { count, countError });
-      
       if (countError) {
-        console.error("User count error:", countError);
         throw countError;
       }
       
       stats.value.totalUsers = count || 0
       
-      console.log("Fetching reimbursement requests...");
       // Fetch reimbursement request stats
       const requestResponse = await client
         .from('claims')
         .select('status')
       
-      console.log("Request response:", requestResponse);
-      
       if (requestResponse.error) {
-        console.error("Request error:", requestResponse.error);
         throw requestResponse.error;
       }
       
@@ -122,7 +114,6 @@
       // For display purposes, use this:
       stats.value.approvedRequests = stats.value.adminVerified + stats.value.managerApproved
       
-      console.log("Fetching pending requests...");
       // Fetch pending reimbursement requests for the dashboard
       const pendingResponse = await client
         .from('claims')
@@ -139,17 +130,15 @@
         .order('created_at', { ascending: false })
         .limit(5)
       
-      console.log("Pending response:", pendingResponse);
-      
       if (pendingResponse.error) {
-        console.error("Pending error:", pendingResponse.error);
         throw pendingResponse.error;
       }
       
       pendingRequests.value = pendingResponse.data || []
       
     } catch (error) {
-      console.error('Error fetching dashboard stats:', error)
+      // Keep error logging for debugging but don't expose sensitive data
+      console.error('Error fetching dashboard stats')
     } finally {
       loading.value = false
     }
@@ -282,8 +271,7 @@
                     <TableCell v-for="j in 8" :key="j" class="py-3">
                       <Skeleton :class="{
                         'h-3 w-12': j === 1,
-                        'h-3 w-24': j === 2,
-                        'h-3 w-24': j === 3,
+                        'h-3 w-24': j === 2 || j === 3,
                         'h-3 w-full': j === 4,
                         'h-3 w-16': j === 5,
                         'h-3 w-20': j === 6,

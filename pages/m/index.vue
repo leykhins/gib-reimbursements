@@ -405,9 +405,8 @@ const getStatusClass = (status) => {
                   <TableCell v-for="j in 8" :key="j" class="py-3">
                     <Skeleton :class="{
                       'h-3 w-12': j === 1,
-                      'h-3 w-24': j === 2,
-                      'h-3 w-24': j === 3,
-                      'h-3 w-full': j === 4,
+                      'h-3 w-24': j === 2 || j === 3,
+                      'h-3 w-32': j === 4,
                       'h-3 w-16': j === 5,
                       'h-3 w-20': j === 6,
                       'h-5 w-20': j === 7,
