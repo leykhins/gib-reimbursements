@@ -23,7 +23,7 @@ export default defineNuxtConfig({
       include: ['cookie']
     },
     define: {
-      global: {}
+      global: 'globalThis'
     }
   },
   runtimeConfig: {

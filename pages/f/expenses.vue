@@ -2,10 +2,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { usePdfMake } from 'nuxt-pdfmake'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
-import { DateRangePicker } from '@/components/ui/date-range-picker'
 import { addDays } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { getReceiptSignedUrl } from '~/lib/utils'
@@ -695,9 +693,9 @@ const generateEmployeePDF = (employeeId) => {
 
   try {
     // Try different ways to access pdfMake
-    const pdfMake = window.pdfMake || useNuxtApp().pdfMake || useNuxtApp().$pdfMake
+    const { $pdfMake } = useNuxtApp()
     
-    if (!pdfMake) {
+    if (!$pdfMake) {
       console.error('pdfMake is not available')
       toast({
         title: 'Error',
@@ -999,9 +997,9 @@ const generateEmployeePDF = (employeeId) => {
     }
 
     // Use pdfMake to generate the PDF
-    console.log("Generating PDF with pdfMake:", pdfMake);
+    console.log("Generating PDF with pdfMake:", $pdfMake);
     const fileName = `${employee.name.replace(/\s+/g, '_')}_Expenses_${monthName}_${yearStr}.pdf`
-    pdfMake.createPdf(docDefinition).download(fileName)
+    $pdfMake.createPdf(docDefinition).download(fileName)
   } catch (err) {
     console.error('PDF generation error:', err)
     toast({
@@ -1131,9 +1129,9 @@ const getTotalNotes = (request) => {
     
     <!-- Month navigation tabs -->
     <div class="flex flex-col lg:flex-row items-stretch lg:items-center text-responsive-base gap-2">
-      <div class="w-full bg-white lg:w-32 text-sm">
+      <div class="w-full lg:w-32 text-sm ">
         <Select v-model="selectedYear">
-          <SelectTrigger class="h-8 w-full">
+          <SelectTrigger class="h-8 w-full shadow-none bg-white">
             <div class="flex items-center">
               <CalendarIcon class="w-4 h-4 mr-2" />
               <SelectValue :placeholder="String(selectedYear)" />
@@ -1208,7 +1206,7 @@ const getTotalNotes = (request) => {
       <div class="w-full lg:w-48 flex items-center gap-1">
         <div class="flex-1">
           <Select v-model="filters.status">
-            <SelectTrigger class="h-8 w-full">
+            <SelectTrigger class="h-8 w-full bg-white shadow-none">
               <SelectValue placeholder="All Statuses" />
             </SelectTrigger>
             <SelectContent>
@@ -1232,14 +1230,14 @@ const getTotalNotes = (request) => {
       </div>
 
       <!-- Date Range Filter -->
-      <div class="w-full lg:w-[350px] flex items-center gap-1">
+      <div class="w-full lg:w-[150px] flex items-center gap-1">
         <div class="flex-1">
           <Popover>
             <PopoverTrigger as-child>
               <Button
                 variant="outline"
                 :class="cn(
-                  'w-full justify-start text-left font-normal h-8',
+                  'w-full justify-start text-left font-normal h-8 bg-white shadow-none',
                   !filters.dateRange.start && 'text-muted-foreground'
                 )"
               >
