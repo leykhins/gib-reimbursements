@@ -60,9 +60,8 @@ const checkManagerStatus = async () => {
     isManager.value = data.role === 'manager' || data.role === 'admin'
     
     // Remove the redirection logic - let middleware handle this
-    console.log('User role in layout:', data.role, 'isManager:', isManager.value)
   } catch (error) {
-    console.error('Error checking manager status:', error)
+    console.error('Error checking manager status')
     // Don't redirect here either
   }
 }

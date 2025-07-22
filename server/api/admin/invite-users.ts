@@ -123,7 +123,7 @@ export default defineEventHandler(async (event) => {
               })
             
             if (insertError) {
-              console.error('Error inserting user record:', insertError)
+              console.error('Error inserting user record')
             }
             
             return { 
@@ -132,11 +132,11 @@ export default defineEventHandler(async (event) => {
               message: 'Invitation sent successfully'
             }
           } catch (error) {
-            console.error('Error inviting user:', error)
+            console.error('Error inviting user')
             return { 
               email: user.email, 
               success: false, 
-              error: error.message || 'Unknown error during invitation'
+              error: 'Unknown error during invitation'
             }
           }
         })
@@ -151,10 +151,10 @@ export default defineEventHandler(async (event) => {
       message: `Successfully sent ${successCount} of ${users.length} invitations`
     }
   } catch (error) {
-    console.error('Error sending invitations:', error)
+    console.error('Error sending invitations')
     throw createError({
       statusCode: 500,
-      statusMessage: `Failed to send invitations: ${error.message}`
+      statusMessage: 'Failed to send invitations'
     })
   }
 }) 

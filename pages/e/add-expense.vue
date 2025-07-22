@@ -9,7 +9,6 @@ import { Calendar } from '@/components/ui/calendar'
 import { CalendarIcon, Plus, Trash2, Upload, ArrowLeft, Check, X, LoaderCircle } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { format, formatISO, parse } from 'date-fns'
-import { GoogleApis } from 'vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -21,7 +20,6 @@ import {
   today,
   parseDate
 } from '@internationalized/date'
-import heic2any from 'heic2any'
 
 // Add showConfirmModal ref
 const showConfirmModal = ref(false)
@@ -414,24 +412,33 @@ const removeExpense = async (id: number) => {
 // Add this helper function to convert HEIC files
 const convertHeicToJpeg = async (file: File): Promise<File> => {
   if (file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
-    try {
-      const convertedBlob = await heic2any({
-        blob: file,
-        toType: 'image/jpeg',
-        quality: 0.8
-      })
-      
-      // Create a new File object with the converted blob
-      const convertedFile = new File(
-        [convertedBlob as Blob], 
-        file.name.replace(/\.(heic|heif)$/i, '.jpg'),
-        { type: 'image/jpeg' }
-      )
-      
-      return convertedFile
-    } catch (error) {
-      console.error('Error converting HEIC file:', error)
-      throw new Error('Failed to convert HEIC file. Please try again.')
+    // Only run on client side
+    if (typeof window !== 'undefined') {
+      try {
+        // Dynamically import heic2any only when needed
+        const { default: heic2any } = await import('heic2any')
+        
+        const convertedBlob = await heic2any({
+          blob: file,
+          toType: 'image/jpeg',
+          quality: 0.8
+        })
+        
+        // Create a new File object with the converted blob
+        const convertedFile = new File(
+          [convertedBlob as Blob], 
+          file.name.replace(/\.(heic|heif)$/i, '.jpg'),
+          { type: 'image/jpeg' }
+        )
+        
+        return convertedFile
+      } catch (error) {
+        console.error('Error converting HEIC file:', error)
+        throw new Error('Failed to convert HEIC file. Please try again.')
+      }
+    } else {
+      // On server side, just return the original file
+      return file
     }
   }
   

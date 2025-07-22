@@ -74,6 +74,14 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 
 const client = useSupabaseClient()
 const user = useSupabaseUser()
@@ -89,8 +97,8 @@ const isAdmin = ref(false)
 const currentPage = ref(1)
 const itemsPerPage = 15
 
-// State for user edit dialog
-const showEditDialog = ref(false)
+// State for user edit dialog - consolidated
+const showEditSheet = ref(false)
 const showPasswordDialog = ref(false)
 const showAddUserDialog = ref(false)
 const selectedUser = ref(null)
@@ -99,6 +107,7 @@ const editForm = ref({
   last_name: '',
   email: '',
   role: '',
+  department: '',
   mileage_rate: 0.61
 })
 const passwordForm = ref({
@@ -325,7 +334,7 @@ const getUserInitials = (user: any) => {
   return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
 }
 
-// Open edit dialog for a user
+// Open edit sheet for a user - updated
 const editUser = (user) => {
   selectedUser.value = user
   editForm.value = {
@@ -333,12 +342,13 @@ const editUser = (user) => {
     last_name: user.last_name || '',
     email: user.email || '',
     role: user.role || 'user',
+    department: user.department || '',
     mileage_rate: user.mileage_rate || 0.61
   }
-  showEditDialog.value = true
+  showEditSheet.value = true
 }
 
-// Save user edits
+// Save user edits - updated
 const saveUserEdits = async () => {
   if (!selectedUser.value) return
   
@@ -349,6 +359,7 @@ const saveUserEdits = async () => {
         first_name: editForm.value.first_name,
         last_name: editForm.value.last_name,
         role: editForm.value.role,
+        department: editForm.value.department,
         mileage_rate: parseFloat(editForm.value.mileage_rate),
         updated_at: new Date()
       })
@@ -356,14 +367,27 @@ const saveUserEdits = async () => {
     
     if (error) throw error
     
-    // Update email if changed (requires auth update)
-    if (editForm.value.email !== selectedUser.value.email) {
-      // This would require admin functions in Supabase or a server endpoint
-      toast({
-        title: 'Note',
-        description: 'Email changes require additional steps and were not applied',
-        variant: 'default'
-      })
+    // If user is a manager, also update department_managers table
+    if (editForm.value.role === 'manager' && editForm.value.department) {
+      // Check if manager already has this department
+      const { data: existingAssignment } = await client
+        .from('department_managers')
+        .select('*')
+        .eq('manager_id', selectedUser.value.id)
+        .eq('department', editForm.value.department)
+        .single()
+      
+      if (!existingAssignment) {
+        // Create new department manager assignment
+        const { error: dmError } = await client
+          .from('department_managers')
+          .insert({
+            department: editForm.value.department,
+            manager_id: selectedUser.value.id
+          })
+        
+        if (dmError) throw dmError
+      }
     }
     
     toast({
@@ -372,7 +396,7 @@ const saveUserEdits = async () => {
       variant: 'default'
     })
     
-    showEditDialog.value = false
+    showEditSheet.value = false
     fetchUsers()
   } catch (error) {
     console.error('Error updating user:', error)
@@ -460,30 +484,24 @@ const addNewUser = async () => {
   
   try {
     loading.value = true
-    
     // Generate a random password for initial setup
     const tempPassword = Math.random().toString(36).slice(-10)
-    
     // Create user in Supabase Auth
     const { data, error: authError } = await client.auth.admin.createUser({
       email: newUserForm.value.email,
       password: newUserForm.value.password || tempPassword,
-      email_confirm: true, // Mark email as confirmed
+      email_confirm: true,
       user_metadata: {
         first_name: newUserForm.value.first_name,
         last_name: newUserForm.value.last_name
       }
     })
-    
     if (authError) {
-      // If admin API fails (might not be available), use invite link method
-      // Send invitation email with a link to sign up
+      // If admin API fails, use invite link method
       const { error: inviteError } = await client.auth.admin.inviteUserByEmail(newUserForm.value.email, {
         redirectTo: `${window.location.origin}/signup`
       })
-      
       if (inviteError) throw inviteError
-      
       // Insert user record in users table
       const { error: insertError } = await client
         .from('users')
@@ -493,12 +511,10 @@ const addNewUser = async () => {
           last_name: newUserForm.value.last_name,
           role: newUserForm.value.role
         })
-      
       if (insertError) throw insertError
     } else {
       // User created successfully with admin API
       const userId = data.user.id
-      
       // Insert user record in users table
       const { error: insertError } = await client
         .from('users')
@@ -509,16 +525,13 @@ const addNewUser = async () => {
           last_name: newUserForm.value.last_name,
           role: newUserForm.value.role
         })
-      
       if (insertError) throw insertError
     }
-    
     toast({
       title: 'Success',
       description: 'User invitation sent successfully',
       variant: 'default'
     })
-    
     showAddUserDialog.value = false
     fetchUsers()
   } catch (error) {
@@ -551,79 +564,6 @@ const deleteUser = async (userId) => {
     toast({
       title: 'Error',
       description: 'Failed to delete user',
-      variant: 'destructive'
-    })
-  }
-}
-
-// Open department assignment dialog
-const assignManager = (user) => {
-  selectedUser.value = user
-  departmentManagerForm.value = {
-    department: user.department || ''
-  }
-  showDepartmentManagerDialog.value = true
-}
-
-// Assign department
-const assignDepartment = async () => {
-  if (!selectedUser.value || !departmentManagerForm.value.department) {
-    toast({
-      title: 'Error',
-      description: 'Please select a department',
-      variant: 'destructive'
-    })
-    return
-  }
-  
-  try {
-    // First update the user's department
-    const { error: userError } = await client
-      .from('users')
-      .update({
-        department: departmentManagerForm.value.department,
-        updated_at: new Date()
-      })
-      .eq('id', selectedUser.value.id)
-    
-    if (userError) throw userError
-    
-    // If user is a manager, also update department_managers table
-    if (selectedUser.value.role === 'manager') {
-      // Check if manager already has this department
-      const { data: existingAssignment } = await client
-        .from('department_managers')
-        .select('*')
-        .eq('manager_id', selectedUser.value.id)
-        .eq('department', departmentManagerForm.value.department)
-        .single()
-      
-      if (!existingAssignment) {
-        // Create new department manager assignment
-        const { error: dmError } = await client
-          .from('department_managers')
-          .insert({
-            department: departmentManagerForm.value.department,
-            manager_id: selectedUser.value.id
-          })
-        
-        if (dmError) throw dmError
-      }
-    }
-    
-    toast({
-      title: 'Success',
-      description: 'Department assigned successfully',
-      variant: 'default'
-    })
-    
-    showDepartmentManagerDialog.value = false
-    fetchUsers()
-  } catch (error) {
-    console.error('Error assigning department:', error)
-    toast({
-      title: 'Error',
-      description: 'Failed to assign department',
       variant: 'destructive'
     })
   }
@@ -679,21 +619,20 @@ const sendInvitations = async () => {
     // Send invitation emails through the server API
     inviteLoadingMessage.value = 'Sending invitation emails...'
     
-    const { data, error } = await useFetch('/api/admin/invite-users', {
+    // Use $fetch instead of useFetch for mounted components
+    const response = await $fetch('/api/admin/invite-users', {
       method: 'POST',
       body: {
         users: inviteEmails.value.map(entry => ({ email: entry.email }))
       }
     })
     
-    if (error.value) {
-      throw new Error(error.value.message || 'Failed to send invitations')
+    if (!response) {
+      throw new Error('No response received from server')
     }
     
-    const response = data.value
-    
     if (!response.success) {
-      throw new Error('Failed to send invitations')
+      throw new Error(response.message || 'Failed to send invitations')
     }
     
     // Calculate success statistics
@@ -702,6 +641,7 @@ const sendInvitations = async () => {
     // Set success message
     if (successCount === inviteEmails.value.length) {
       inviteSuccessMessage.value = `Successfully invited ${successCount} users!`
+      showInviteDialog.value = false // Close dialog on complete success
     } else if (successCount > 0) {
       inviteSuccessMessage.value = `Invited ${successCount} of ${inviteEmails.value.length} users.`
       
@@ -826,7 +766,6 @@ definePageMeta({
                 <TableCell>
                   <div class="flex items-center gap-3">
                     <Avatar size="sm" shape="circle" class="text-white">
-                      <AvatarImage :src="user.avatar_url" :alt="`${user.first_name} ${user.last_name}`" />
                       <AvatarFallback>{{ getUserInitials(user) }}</AvatarFallback>
                     </Avatar>
                     <span class="font-medium">{{ user.first_name }} {{ user.last_name }}</span>
@@ -853,9 +792,6 @@ definePageMeta({
                     </Button>
                     <Button class="shadow-none" variant="outline" size="icon" @click="changePassword(user)">
                       <Key class="h-4 w-4" />
-                    </Button>
-                    <Button class="shadow-none" variant="outline" size="icon" @click="assignManager(user)">
-                      <UserCog class="h-4 w-4" />
                     </Button>
                     <Button class="shadow-none" variant="outline" size="icon" @click="deleteUser(user.id)">
                       <Trash2 class="h-4 w-4" />
@@ -912,61 +848,98 @@ definePageMeta({
     </div>
   </div>
   
-  <!-- Edit User Dialog -->
-  <Dialog v-model:open="showEditDialog">
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>Edit User</DialogTitle>
-        <DialogDescription>
-          Make changes to the user's profile here.
-        </DialogDescription>
-      </DialogHeader>
-      <div class="grid gap-4 py-4">
-        <div class="grid grid-cols-4 items-center gap-4">
-          <label class="text-right">First Name</label>
-          <Input v-model="editForm.first_name" class="col-span-3" />
+  <!-- Edit User Sheet -->
+  <Sheet v-model:open="showEditSheet">
+    <SheetContent class="w-[400px] sm:w-[540px]">
+      <SheetHeader>
+        <SheetTitle>Edit User Profile</SheetTitle>
+        <SheetDescription>
+          Update user information and department assignment.
+        </SheetDescription>
+      </SheetHeader>
+      
+      <div class="mt-6">
+        <!-- Cover Image -->
+        <div class="h-32 bg-gray-200 rounded-t-lg mb-4"></div>
+        
+        <!-- Avatar Section -->
+        <div class="flex justify-center -mt-16 mb-6">
+          <Avatar class="h-24 w-24 border-4 border-white shadow-lg text-white">
+            <AvatarFallback class="text-lg">{{ getUserInitials(selectedUser) }}</AvatarFallback>
+          </Avatar>
         </div>
-        <div class="grid grid-cols-4 items-center gap-4">
-          <label class="text-right">Last Name</label>
-          <Input v-model="editForm.last_name" class="col-span-3" />
-        </div>
-        <div class="grid grid-cols-4 items-center gap-4">
-          <label class="text-right">Email</label>
-          <Input v-model="editForm.email" class="col-span-3" disabled />
-        </div>
-        <div class="grid grid-cols-4 items-center gap-4">
-          <label class="text-right">Role</label>
-          <Select v-model="editForm.role" class="col-span-3">
-            <SelectTrigger>
-              <SelectValue placeholder="Select role" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="accounting">Accounting</SelectItem>
-              <SelectItem value="admin">Admin</SelectItem>
-              <SelectItem value="employee">Employee</SelectItem>
-              <SelectItem value="manager">Manager</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div class="grid grid-cols-4 items-center gap-4">
-          <label class="text-right">Mileage Rate ($/km)</label>
-          <Input 
-            v-model="editForm.mileage_rate" 
-            type="number" 
-            step="0.01" 
-            min="0" 
-            max="10"
-            class="col-span-3" 
-            placeholder="0.61"
-          />
+        
+        <!-- Form Fields -->
+        <div class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <Label for="first_name">First Name</Label>
+              <Input id="first_name" v-model="editForm.first_name" />
+            </div>
+            <div>
+              <Label for="last_name">Last Name</Label>
+              <Input id="last_name" v-model="editForm.last_name" />
+            </div>
+          </div>
+          
+          <div>
+            <Label for="email">Email</Label>
+            <Input id="email" v-model="editForm.email" disabled />
+          </div>
+          
+          <div>
+            <Label for="role">Role</Label>
+            <Select v-model="editForm.role">
+              <SelectTrigger>
+                <SelectValue placeholder="Select role" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="accounting">Accounting</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="employee">Employee</SelectItem>
+                <SelectItem value="manager">Manager</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div>
+            <Label for="department">Department</Label>
+            <Select v-model="editForm.department">
+              <SelectTrigger>
+                <SelectValue placeholder="Select department" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Leadership">Leadership</SelectItem>
+                <SelectItem value="Admin/HR">Admin/HR</SelectItem>
+                <SelectItem value="Operations">Operations</SelectItem>
+                <SelectItem value="Project Management">Project Management</SelectItem>
+                <SelectItem value="Sales/Marketing">Sales/Marketing</SelectItem>
+                <SelectItem value="Finance">Finance</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div>
+            <Label for="mileage_rate">Mileage Rate ($/km)</Label>
+            <Input 
+              id="mileage_rate"
+              v-model="editForm.mileage_rate" 
+              type="number" 
+              step="0.01" 
+              min="0" 
+              max="10"
+              placeholder="0.61"
+            />
+          </div>
         </div>
       </div>
-      <DialogFooter>
-        <Button variant="outline" @click="showEditDialog = false">Cancel</Button>
-        <Button @click="saveUserEdits">Save changes</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+      
+      <SheetFooter class="mt-6">
+        <Button variant="outline" @click="showEditSheet = false">Cancel</Button>
+        <Button @click="saveUserEdits">Save Changes</Button>
+      </SheetFooter>
+    </SheetContent>
+  </Sheet>
   
   <!-- Change Password Dialog -->
   <Dialog v-model:open="showPasswordDialog">
@@ -1038,42 +1011,6 @@ definePageMeta({
       <DialogFooter>
         <Button variant="outline" @click="showAddUserDialog = false">Cancel</Button>
         <Button @click="addNewUser">Create User</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-
-  <!-- Add a new dialog for department manager assignment -->
-  <Dialog v-model:open="showDepartmentManagerDialog">
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>Assign Department</DialogTitle>
-        <DialogDescription>
-          Assign this user to a department.
-        </DialogDescription>
-      </DialogHeader>
-      <div class="grid gap-4 py-4">
-        <div class="grid grid-cols-4 items-center gap-4">
-          <label class="text-right">Department</label>
-          <div class="col-span-3">
-            <Select v-model="departmentManagerForm.department">
-              <SelectTrigger>
-                <SelectValue placeholder="Select department" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Leadership">Leadership</SelectItem>
-                <SelectItem value="Admin/HR">Admin/HR</SelectItem>
-                <SelectItem value="Operations">Operations</SelectItem>
-                <SelectItem value="Project Management">Project Management</SelectItem>
-                <SelectItem value="Sales/Marketing">Sales/Marketing</SelectItem>
-                <SelectItem value="Finance">Finance</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-      <DialogFooter>
-        <Button variant="outline" @click="showDepartmentManagerDialog = false">Cancel</Button>
-        <Button @click="assignDepartment">Assign</Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

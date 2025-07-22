@@ -26,7 +26,6 @@ export default defineNuxtRouteMiddleware(async (to) => {
     
     // If admin, always allow access without redirection
     if (data.role === 'admin') {
-      console.log('Admin access granted')
       return
     }
     

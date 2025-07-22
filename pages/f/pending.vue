@@ -124,19 +124,38 @@ const fetchAvailableYears = async () => {
 const fetchCategories = async () => {
   try {
     const { data: categoryData, error: categoryError } = await client
-      .from('expense_categories')
+      .from('claim_categories')
       .select(`
         id,
-        name,
-        expense_subcategories (
+        category_name,
+        category_subcategory_mapping!inner (
           id,
-          name
+          requires_job_number,
+          requires_employee_name,
+          requires_client_info,
+          subcategory:claim_subcategories (
+            id,
+            subcategory_name
+          )
         )
       `)
-      .order('name')
+      .order('category_name')
     
     if (categoryError) throw categoryError
-    categories.value = categoryData || []
+    
+    // Transform the data to match the expected structure
+    categories.value = categoryData?.map(category => ({
+      id: category.id,
+      name: category.category_name,
+      expense_subcategories: category.category_subcategory_mapping.map(mapping => ({
+        id: mapping.subcategory.id,
+        name: mapping.subcategory.subcategory_name,
+        mapping_id: mapping.id,
+        requires_job_number: mapping.requires_job_number,
+        requires_employee_name: mapping.requires_employee_name,
+        requires_client_info: mapping.requires_client_info
+      }))
+    })) || []
   } catch (err) {
     console.error('Error fetching categories:', err)
     toast({

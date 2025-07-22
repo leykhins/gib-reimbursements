@@ -253,7 +253,7 @@ export default defineEventHandler(async (event) => {
     
     return { success: true, messageId: data?.id }
   } catch (error) {
-    console.error('Error sending notification:', error)
+    console.error('Error sending notification')
     throw createError({
       statusCode: 500,
       statusMessage: 'Failed to send notification'
