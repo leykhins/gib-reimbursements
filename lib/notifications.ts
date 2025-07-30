@@ -155,6 +155,7 @@ export const sendClaimRejectionEmail = async (
         recipientName: userData.fullName,
         claimId: claimId,
         claimDetails: claimData,
+        notificationType: 'rejection',
         rejectedBy: rejectedBy,
         rejectionReason: rejectionReason,
         rejectorName: rejectorName
@@ -1702,5 +1703,155 @@ export const sendConsolidatedRejectionEmail = async (
   } catch (error) {
     console.error('Failed to send consolidated rejection email notification:', error)
     return { success: false, error }
+  }
+}
+
+/**
+ * Enhanced email notification service with error handling and UI feedback
+ */
+export interface NotificationResult {
+  success: boolean
+  results: EmailNotificationResult[]
+  errors: EmailNotificationResult[]
+}
+
+export const sendNotificationWithErrorHandling = async (
+  notificationData: any,
+  showToast: (toast: any) => void
+): Promise<NotificationResult> => {
+  const results: EmailNotificationResult[] = []
+  const errors: EmailNotificationResult[] = []
+
+  try {
+    const result = await emailRateLimiter.addToQueue(async () => {
+      return await $fetch('/api/send-notification', {
+        method: 'POST',
+        body: notificationData
+      })
+    })
+
+    results.push({
+      success: true,
+      messageId: result.messageId,
+      recipientEmail: notificationData.recipientEmail,
+      notificationType: notificationData.notificationType
+    })
+
+    return { success: true, results, errors }
+  } catch (error) {
+    const errorResult: EmailNotificationResult = {
+      success: false,
+      error: error.message || 'Failed to send notification',
+      recipientEmail: notificationData.recipientEmail,
+      notificationType: notificationData.notificationType
+    }
+    
+    errors.push(errorResult)
+    
+    // Show error toast
+    showToast({
+      title: 'Email Notification Failed',
+      description: `Failed to send email to ${notificationData.recipientEmail}: ${errorResult.error}`,
+      variant: 'destructive'
+    })
+
+    return { success: false, results, errors }
+  }
+}
+
+/**
+ * Enhanced claim submission function with proper error handling
+ */
+export const sendEnhancedClaimSubmissionEmailWithErrorHandling = async (
+  claimId: string,
+  showToast: (toast: any) => void
+): Promise<NotificationResult> => {
+  try {
+    const client = useSupabaseClient()
+    const { claimData, userData } = await getClaimDetailsForEmail(client, claimId)
+    const adminDetails = await getAllAdminDetails(client)
+    
+    const allResults: EmailNotificationResult[] = []
+    const allErrors: EmailNotificationResult[] = []
+    
+    // Send confirmation email to the employee
+    const employeeResult = await sendNotificationWithErrorHandling({
+      recipientEmail: userData.email,
+      recipientName: userData.fullName,
+      claimId: claimId,
+      claimDetails: claimData,
+      notificationType: 'employee_submission_confirmation'
+    }, showToast)
+    
+    allResults.push(...employeeResult.results)
+    allErrors.push(...employeeResult.errors)
+    
+    // Send notification emails to all admins
+    const adminPromises = adminDetails.map(admin => 
+      sendNotificationWithErrorHandling({
+        recipientEmail: admin.email,
+        recipientName: admin.name,
+        claimId: claimId,
+        claimDetails: claimData,
+        notificationType: 'submission',
+        employeeName: userData.fullName
+      }, showToast)
+    )
+    
+    const adminResults = await Promise.all(adminPromises)
+    
+    adminResults.forEach(result => {
+      allResults.push(...result.results)
+      allErrors.push(...result.errors)
+    })
+    
+    const hasErrors = allErrors.length > 0
+    const hasSuccess = allResults.length > 0
+    
+    // Show summary toast
+    if (hasErrors && hasSuccess) {
+      showToast({
+        title: 'Partial Email Success',
+        description: `${allResults.length} emails sent successfully, ${allErrors.length} failed`,
+        variant: 'default'
+      })
+    } else if (hasErrors) {
+      showToast({
+        title: 'Email Notifications Failed',
+        description: `Failed to send ${allErrors.length} email notifications`,
+        variant: 'destructive'
+      })
+    } else {
+      showToast({
+        title: 'Email Notifications Sent',
+        description: `Successfully sent ${allResults.length} email notifications`,
+        variant: 'default'
+      })
+    }
+    
+    return { 
+      success: !hasErrors, 
+      results: allResults, 
+      errors: allErrors 
+    }
+  } catch (error) {
+    console.error('Failed to send enhanced submission email notification:', error)
+    
+    showToast({
+      title: 'Email System Error',
+      description: 'Failed to process email notifications',
+      variant: 'destructive'
+    })
+    
+    return { 
+      success: false, 
+      results: [], 
+      errors: [{
+        success: false,
+        error: error.message || 'System error',
+        recipientEmail: 'unknown',
+        notificationType: 'submission'
+      }]
+    }
   }
 }

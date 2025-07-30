@@ -593,16 +593,14 @@ const confirmVerification = async () => {
     
     const promises = verifyingRequests.value.map(async (id) => {
       try {
-        const { error: updateError } = await client
-          .from('claims')
-          .update({
-            status: 'approved',
-            manager_approved_by: user.value.id,
-            manager_approved_at: new Date().toISOString()
+        const { data, error } = await client
+          .rpc('update_claim_status', {
+            claim_id: id,
+            new_status: 'approved',
+            rejection_reason: null
           })
-          .eq('id', id)
         
-        if (updateError) throw updateError
+        if (error) throw error
       } finally {
         verifyingRequestIds.value.delete(id)
       }
@@ -656,15 +654,12 @@ const rejectRequest = async (requestId) => {
 const confirmRejection = async () => {
   try {
     isRejecting.value = true
-    const { error } = await client
-      .from('claims')
-      .update({
-        status: 'rejected',
-        manager_approved_by: user.value.id,
-        manager_approved_at: new Date().toISOString(),
+    const { data, error } = await client
+      .rpc('update_claim_status', {
+        claim_id: rejectingRequestId.value,
+        new_status: 'rejected',
         rejection_reason: rejectionReason.value
       })
-      .eq('id', rejectingRequestId.value)
     
     if (error) throw error
     

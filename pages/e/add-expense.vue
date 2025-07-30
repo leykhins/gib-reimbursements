@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Toaster } from '@/components/ui/toast'
+import { useToast } from '@/components/ui/toast/use-toast'
 import {
   DateFormatter,
   type DateValue,
@@ -38,6 +40,7 @@ definePageMeta({
 const router = useRouter()
 const client = useSupabaseClient()
 const user = useSupabaseUser()
+const { toast } = useToast() // Change this line to destructure toast
 const loading = ref(false)
 const error = ref('')
 const uploadStatus = ref<Record<number, 'idle' | 'uploading' | 'success' | 'error'>>({})
@@ -688,10 +691,23 @@ const confirmSubmit = async () => {
     // Send a single consolidated notification for all claims to admins AND employee
     try {
       const { sendEnhancedConsolidatedClaimSubmissionEmail } = await import('~/lib/notifications')
-      await sendEnhancedConsolidatedClaimSubmissionEmail(submittedClaimIds)
+      const notificationResult = await sendEnhancedConsolidatedClaimSubmissionEmail(
+        submittedClaimIds
+      )
+      
+      // Show success toast
+      toast({
+        title: 'Claims Submitted Successfully',
+        description: `Successfully submitted ${submittedClaimIds.length} claim${submittedClaimIds.length > 1 ? 's' : ''}`,
+        variant: 'default'
+      })
     } catch (emailError) {
       console.error('Failed to send email notification:', emailError)
-      // Continue even if email fails - the claims are still submitted
+      toast({
+        title: 'Email Notification Error',
+        description: 'Failed to send email notifications. Claims were submitted successfully.',
+        variant: 'destructive'
+      })
     }
     
     // Close modal and navigate to dashboard
@@ -1138,6 +1154,7 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
       <div v-if="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
         {{ error }}
       </div>
+      <Toaster />
       
       <div v-if="categoriesLoading" class="space-y-6">
         <Card class="mb-6 shadow-none">

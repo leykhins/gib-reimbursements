@@ -445,13 +445,23 @@ const submitClaim = async (claimData) => {
     
     if (error) throw error
     
-    // Send notification to all admins AND employee
+    // Send notification to all admins AND employee with error handling
     try {
-      const { sendEnhancedClaimSubmissionEmail } = await import('~/lib/notifications')
-      await sendEnhancedClaimSubmissionEmail(data.id)
+      const notificationResult = await sendEnhancedClaimSubmissionEmailWithErrorHandling(
+        data.id,
+        toast
+      )
+      
+      if (!notificationResult.success) {
+        console.warn('Some email notifications failed:', notificationResult.errors)
+      }
     } catch (emailError) {
       console.error('Failed to send email notification:', emailError)
-      // Continue even if email fails - the claim is still submitted
+      toast({
+        title: 'Email Notification Error',
+        description: 'Failed to send email notifications. Claim was submitted successfully.',
+        variant: 'destructive'
+      })
     }
     
     // Show success message and refresh
