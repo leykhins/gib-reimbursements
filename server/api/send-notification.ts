@@ -207,15 +207,55 @@ export default defineEventHandler(async (event) => {
     
     // Send email with sender name
     const { data, error } = await resend.emails.send({
-      from: 'GibClaim <' + config.emailFrom + '>',
+      from: `GibClaim <${config.emailFrom}>`,
       to: recipientEmail,
       subject: subject,
       html: emailHtmlContent,
     })
     
-    if (error) throw error
+    if (error) {
+      // Log failed email to database
+      const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey)
+      
+      if (notificationType === 'consolidated_submission' || 
+          notificationType === 'employee_consolidated_submission_confirmation' ||
+          notificationType === 'consolidated_admin_verification' ||
+          notificationType === 'consolidated_employee_verification' ||
+          notificationType === 'consolidated_manager_approval' ||
+          notificationType === 'consolidated_employee_approval' ||
+          notificationType === 'consolidated_processing_complete' ||
+          notificationType === 'consolidated_rejection') {
+        await Promise.all(claimIds.map(claimId => 
+          supabase
+            .from('email_notifications')
+            .insert({
+              claim_id: claimId,
+              recipient_email: recipientEmail,
+              notification_type: notificationType,
+              sent_at: new Date().toISOString(),
+              sent_by: rejectedBy || null,
+              status: 'failed',
+              error_message: error.message || 'Email service error'
+            })
+        ))
+      } else {
+        await supabase
+          .from('email_notifications')
+          .insert({
+            claim_id: claimId,
+            recipient_email: recipientEmail,
+            notification_type: notificationType,
+            sent_at: new Date().toISOString(),
+            sent_by: rejectedBy || null,
+            status: 'failed',
+            error_message: error.message || 'Email service error'
+          })
+      }
+      
+      throw error
+    }
     
-    // Log to supabase notifications table for record keeping
+    // Log successful email to database
     const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey)
     
     if (notificationType === 'consolidated_submission' || 
@@ -253,11 +293,14 @@ export default defineEventHandler(async (event) => {
     
     return { success: true, messageId: data?.id }
   } catch (error) {
-    console.error('Error sending notification')
-    throw createError({
-      statusCode: 500,
-      statusMessage: 'Failed to send notification'
-    })
+    console.error('Error sending notification:', error)
+    
+    // Return detailed error information
+    return {
+      success: false,
+      error: error.message || 'Failed to send notification',
+      statusCode: error.statusCode || 500
+    }
   }
 })
 
