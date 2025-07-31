@@ -881,16 +881,16 @@ const generateEmployeePDF = (employeeId) => {
               table: {
                 body: [
                   [
-                    { text: 'Category Subtotal:', style: 'subtotalLabel' },
-                    { text: formatCurrency(categoryTotal), style: 'subtotalValue', alignment: 'right' }
-                  ],
-                  [
                     { text: 'Category GST:', style: 'subtotalLabel' },
                     { text: formatCurrency(categoryGst), style: 'subtotalValue', alignment: 'right' }
                   ],
                   [
                     { text: 'Category PST:', style: 'subtotalLabel' },
                     { text: formatCurrency(categoryPst), style: 'subtotalValue', alignment: 'right' }
+                  ],
+                  [
+                    { text: 'Category Subtotal:', style: 'subtotalLabel' },
+                    { text: formatCurrency(categoryTotal), style: 'subtotalValue', alignment: 'right' }
                   ]
                 ]
               },
