@@ -26,6 +26,7 @@ export interface ReimbursementRequest {
   manager_approved_at?: string | null;
   accounting_processed_by?: string | null;
   accounting_processed_at?: string | null;
+  pdf_downloaded_at?: string | null;
   payment_method?: 'bank_draft' | 'e-transfer' | null;
   payment_reference?: string | null;
   created_at: string;

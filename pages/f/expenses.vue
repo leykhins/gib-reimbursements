@@ -810,9 +810,9 @@ const generateEmployeePDF = (employeeId) => {
           { text: 'Date', style: 'tableHeader' },
           { text: 'Job #', style: 'tableHeader' },
           { text: 'Description', style: 'tableHeader' },
-          { text: 'Amount', style: 'tableHeader', alignment: 'right' },
           { text: 'GST', style: 'tableHeader', alignment: 'right' },
-          { text: 'PST', style: 'tableHeader', alignment: 'right' }
+          { text: 'PST', style: 'tableHeader', alignment: 'right' },
+          { text: 'Amount', style: 'tableHeader', alignment: 'right' }
         ]
       ]
       
@@ -834,8 +834,8 @@ const generateEmployeePDF = (employeeId) => {
             overallPst += pst
             
             tableBody.push([
-              formatDate(request.date),
-              request.job_number,
+              { text: formatDate(request.date), fontSize: 10 },
+              { text: request.job_number, fontSize: 10 },
               {
                 text: [
                   request.description,
@@ -845,9 +845,9 @@ const generateEmployeePDF = (employeeId) => {
                 ],
                 fontSize: 9
               },
-              { text: formatCurrency(amount), alignment: 'right' },
-              { text: formatCurrency(gst), alignment: 'right' },
-              { text: formatCurrency(pst), alignment: 'right' }
+              { text: formatCurrency(gst), alignment: 'right', fontSize: 10 },
+              { text: formatCurrency(pst), alignment: 'right', fontSize: 10 },
+              { text: formatCurrency(amount), alignment: 'right', fontSize: 10 },
             ])
           }
         })
@@ -950,12 +950,12 @@ const generateEmployeePDF = (employeeId) => {
       content: docContent,
       styles: {
         header: {
-          fontSize: 18,
+          fontSize: 14,
           bold: true,
           margin: [0, 0, 0, 10]
         },
         categoryHeader: {
-          fontSize: 14,
+          fontSize: 11,
           bold: true,
           color: '#333'
         },
@@ -976,12 +976,12 @@ const generateEmployeePDF = (employeeId) => {
         },
         totalLabel: {
           bold: true,
-          fontSize: 12,
+          fontSize: 11,
           margin: [0, 3, 0, 3]
         },
         totalValue: {
           bold: true,
-          fontSize: 12,
+          fontSize: 11,
           margin: [0, 3, 0, 3]
         }
       },
@@ -1006,7 +1006,7 @@ const generateEmployeePDF = (employeeId) => {
           margin: [0, 10]
         }
       },
-      pageSize: 'A4',
+      pageSize: 'Letter',
       pageMargins: [40, 40, 40, 60]
     }
 
