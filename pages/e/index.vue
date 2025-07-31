@@ -307,7 +307,7 @@ const monthlyChangeText = computed(() => {
             <CheckCircle class="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div class="text-responsive-2xl font-bold mb-2">{{ reimbursementRequests.filter(r => r.status === 'processed').length }}</div>
+            <div class="text-responsive-2xl font-bold mb-2">{{ reimbursementRequests.filter(r => r.status === 'completed').length }}</div>
             <p class="text-responsive-xs text-muted-foreground">Fully processed</p>
           </CardContent>
         </Card>

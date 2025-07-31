@@ -881,16 +881,16 @@ const generateEmployeePDF = (employeeId) => {
               table: {
                 body: [
                   [
-                    { text: 'Category Subtotal:', style: 'subtotalLabel' },
-                    { text: formatCurrency(categoryTotal), style: 'subtotalValue', alignment: 'right' }
-                  ],
-                  [
                     { text: 'Category GST:', style: 'subtotalLabel' },
                     { text: formatCurrency(categoryGst), style: 'subtotalValue', alignment: 'right' }
                   ],
                   [
                     { text: 'Category PST:', style: 'subtotalLabel' },
                     { text: formatCurrency(categoryPst), style: 'subtotalValue', alignment: 'right' }
+                  ],
+                  [
+                    { text: 'Category Subtotal:', style: 'subtotalLabel' },
+                    { text: formatCurrency(categoryTotal), style: 'subtotalValue', alignment: 'right' }
                   ]
                 ]
               },
@@ -918,16 +918,16 @@ const generateEmployeePDF = (employeeId) => {
           table: {
             body: [
               [
-                { text: 'TOTAL AMOUNT:', style: 'totalLabel' },
-                { text: formatCurrency(overallTotal), style: 'totalValue', alignment: 'right' }
-              ],
-              [
                 { text: 'TOTAL GST:', style: 'totalLabel' },
                 { text: formatCurrency(overallGst), style: 'totalValue', alignment: 'right' }
               ],
               [
                 { text: 'TOTAL PST:', style: 'totalLabel' },
                 { text: formatCurrency(overallPst), style: 'totalValue', alignment: 'right' }
+              ],
+              [
+                { text: 'TOTAL AMOUNT:', style: 'totalLabel' },
+                { text: formatCurrency(overallTotal), style: 'totalValue', alignment: 'right' }
               ]
             ]
           },

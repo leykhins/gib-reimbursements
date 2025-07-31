@@ -46,7 +46,7 @@
       const { data: processedData, error: processedError } = await client
         .from('claims')
         .select('id, amount, gst_amount, pst_amount')
-        .eq('status', 'processed')
+        .eq('status', 'completed')
         .not('accounting_processed_at', 'is', null)
         .order('accounting_processed_at', { ascending: false })
         .limit(10)
