@@ -918,16 +918,16 @@ const generateEmployeePDF = (employeeId) => {
           table: {
             body: [
               [
-                { text: 'TOTAL AMOUNT:', style: 'totalLabel' },
-                { text: formatCurrency(overallTotal), style: 'totalValue', alignment: 'right' }
-              ],
-              [
                 { text: 'TOTAL GST:', style: 'totalLabel' },
                 { text: formatCurrency(overallGst), style: 'totalValue', alignment: 'right' }
               ],
               [
                 { text: 'TOTAL PST:', style: 'totalLabel' },
                 { text: formatCurrency(overallPst), style: 'totalValue', alignment: 'right' }
+              ],
+              [
+                { text: 'TOTAL AMOUNT:', style: 'totalLabel' },
+                { text: formatCurrency(overallTotal), style: 'totalValue', alignment: 'right' }
               ]
             ]
           },
