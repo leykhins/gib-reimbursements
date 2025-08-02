@@ -8,7 +8,7 @@
 const route = useRoute()
 
 useHead({
-  title: route.meta.title || 'GibClaim',
+  title: route.meta?.title || 'GibClaim',
   titleTemplate: (title) => {
     return title ? `${title} - GibClaim` : 'GibClaim'
   },

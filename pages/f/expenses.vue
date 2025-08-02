@@ -701,12 +701,11 @@ const confirmRejection = async () => {
 }
 
 // Update the PDF generation function
-const generateEmployeePDF = (employeeId) => {
+const generateEmployeePDF = async (employeeId) => {
   const employee = organizedData.value[employeeId]
   if (!employee) return
 
   try {
-    // Try different ways to access pdfMake
     const { $pdfMake } = useNuxtApp()
     
     if (!$pdfMake) {
@@ -719,20 +718,24 @@ const generateEmployeePDF = (employeeId) => {
       return
     }
     
-    // Check if any completed claims exist for this employee this month
-    let hasCompletedClaims = false
+    // Check if any undownloaded completed claims exist
+    let hasUndownloadedClaims = false
+    const claimIds = []
     Object.values(employee.categories).forEach(category => {
       Object.values(category.jobGroups).forEach(jobGroup => {
-        if (jobGroup.requests.some(req => req.status === 'completed')) {
-          hasCompletedClaims = true
-        }
+        jobGroup.requests.forEach(request => {
+          if (request.status === 'completed' && !request.pdf_downloaded_at) {
+            hasUndownloadedClaims = true
+            claimIds.push(request.id)
+          }
+        })
       })
     })
 
-    if (!hasCompletedClaims) {
+    if (!hasUndownloadedClaims) {
       toast({
-        title: 'No Completed Claims',
-        description: 'This employee has no completed claims for the selected period',
+        title: 'No New Claims',
+        description: 'This employee has no undownloaded completed claims for the selected period',
         variant: 'destructive'
       })
       return
@@ -819,7 +822,7 @@ const generateEmployeePDF = (employeeId) => {
       // Add entries for this category
       Object.entries(category.jobGroups).forEach(([jobNumber, jobGroup]) => {
         jobGroup.requests.forEach(request => {
-          if (request.status === 'completed') {
+          if (request.status === 'completed' && !request.pdf_downloaded_at) {
             categoryHasCompletedClaims = true
             const amount = parseFloat(request.amount) || 0
             const gst = parseFloat(request.gst_amount) || 0
@@ -1013,8 +1016,26 @@ const generateEmployeePDF = (employeeId) => {
     // Use pdfMake to generate the PDF
     const fileName = `${employee.name.replace(/\s+/g, '_')}_Expenses_${monthName}_${yearStr}.pdf`
     $pdfMake.createPdf(docDefinition).download(fileName)
+
+    // Mark claims as downloaded
+    if (claimIds.length > 0) {
+      await client
+        .from('claims')
+        .update({ pdf_downloaded_at: new Date().toISOString() })
+        .in('id', claimIds)
+      
+      // Refresh data to show updated status
+      await fetchReimbursementRequests()
+      
+      toast({
+        title: 'Success',
+        description: `PDF generated and ${claimIds.length} claims marked as downloaded`,
+        variant: 'default'
+      })
+    }
+
   } catch (err) {
-    console.error('PDF generation error')
+    console.error('PDF generation error', err)
     toast({
       title: 'Error',
       description: 'Failed to generate PDF',
@@ -1028,22 +1049,19 @@ const hasAllClaimsCompleted = (employeeId) => {
   const employee = organizedData.value[employeeId]
   if (!employee) return false
   
-  let hasAnyRequests = false
-  let allCompleted = true
+  let hasUndownloadedCompleted = false
   
   Object.values(employee.categories).forEach(category => {
     Object.values(category.jobGroups).forEach(jobGroup => {
       jobGroup.requests.forEach(request => {
-        hasAnyRequests = true
-        if (request.status !== 'completed') {
-          allCompleted = false
+        if (request.status === 'completed' && !request.pdf_downloaded_at) {
+          hasUndownloadedCompleted = true
         }
       })
     })
   })
   
-  // Only return true if the employee has at least one request and all are completed
-  return hasAnyRequests && allCompleted
+  return hasUndownloadedCompleted
 }
 
 // Add this function after toggleJob
@@ -1053,6 +1071,18 @@ const hasEmployeeSelectedRequests = (employeeId) => {
   return Object.values(employee.categories).some(category => 
     Object.values(category.jobGroups).some(jobGroup => 
       jobGroup.requests.some(request => selectedRequests.value.has(request.id))
+    )
+  )
+}
+
+// Add this function after hasAllClaimsCompleted
+const hasAnyCompletedClaims = (employeeId) => {
+  const employee = organizedData.value[employeeId]
+  if (!employee) return false
+  
+  return Object.values(employee.categories).some(category => 
+    Object.values(category.jobGroups).some(jobGroup => 
+      jobGroup.requests.some(request => request.status === 'completed')
     )
   )
 }
@@ -1369,15 +1399,20 @@ const getTotalNotes = (request) => {
               </div>
               <!-- Modified PDF export button to only show for employees with all completed claims -->
               <Button 
-                v-if="hasAllClaimsCompleted(employeeId)"
+                v-if="hasAnyCompletedClaims(employeeId)"
                 variant="outline" 
                 size="sm"
                 @click.stop="generateEmployeePDF(employeeId)"
-                class="ml-2 bg-white/20 hover:bg-white/30 border-white/40"
-                title="Export Completed Claims to PDF"
+                :class="[
+                  'ml-2 border-white/40',
+                  hasAllClaimsCompleted(employeeId) 
+                    ? 'bg-white/20 hover:bg-white/30' 
+                    : 'bg-green-500/80 hover:bg-green-600/80'
+                ]"
+                :title="hasAllClaimsCompleted(employeeId) ? 'Export New Claims to PDF' : 'All Claims Downloaded'"
               >
                 <Download class="h-4 w-4 mr-1" />
-                PDF
+                {{ hasAllClaimsCompleted(employeeId) ? 'PDF' : 'Downloaded' }}
               </Button>
             </div>
             <div class="flex items-center space-x-4">
@@ -1562,18 +1597,20 @@ const getTotalNotes = (request) => {
                                     </div>
                                 </TableCell>
                                 <TableCell class="py-2">
-                                  <span :class="[
-                                  'inline-flex items-center px-2 py-0.5 rounded-full text-xs gap-1', 
-                                  getStatusClass(request.status)
-                                  ]">
+                                  <div class="space-y-1">
+                                    <span :class="[
+                                      'inline-flex items-center px-2 py-0.5 rounded-full text-xs gap-1', 
+                                      getStatusClass(request.status)
+                                    ]">
                                       <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
                                       <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
                                       <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
                                       <span class="font-medium">
-                                          {{ formatStatus(request.status) }}
-                                          <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">- {{ request.rejection_reason }}</span>
+                                        {{ formatStatus(request.status) }}
+                                        <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">- {{ request.rejection_reason }}</span>
                                       </span>
-                                  </span>
+                                    </span>
+                                  </div>
                                 </TableCell>
                                 <TableCell class="py-2">
                                   <div v-if="request.notes && request.notes.length > 0" class="space-y-1">
