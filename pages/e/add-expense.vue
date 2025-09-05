@@ -1445,7 +1445,8 @@
                   </PopoverTrigger>
                   <PopoverContent class="w-auto p-0">
                     <Calendar 
-                      v-model="expense.date" 
+                      v-model="expense.date"
+                      :max-value="today(getLocalTimeZone())" 
                       initial-focus 
                       @update:model-value="() => expense.datePopoverOpen = false"
                     />
