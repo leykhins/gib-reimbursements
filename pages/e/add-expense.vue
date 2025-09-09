@@ -1,1142 +1,1230 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Calendar } from '@/components/ui/calendar'
-import { CalendarIcon, Plus, Trash2, Upload, ArrowLeft, Check, X, LoaderCircle } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
-import { format, formatISO, parse } from 'date-fns'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { cn } from '@/lib/utils'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Toaster } from '@/components/ui/toast'
-import { useToast } from '@/components/ui/toast/use-toast'
-import {
-  DateFormatter,
-  type DateValue,
-  getLocalTimeZone,
-  today,
-  parseDate
-} from '@internationalized/date'
+  import { ref, computed, onMounted, watch, nextTick } from 'vue'
+  import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+  import { Button } from '@/components/ui/button'
+  import { Input } from '@/components/ui/input'
+  import { Label } from '@/components/ui/label'
+  import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+  import { Calendar } from '@/components/ui/calendar'
+  import { CalendarIcon, Plus, Trash2, Upload, ArrowLeft, Check, X, LoaderCircle } from 'lucide-vue-next'
+  import { useRouter } from 'vue-router'
+  import { format, formatISO, parse } from 'date-fns'
+  import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+  import { cn } from '@/lib/utils'
+  import { Skeleton } from '@/components/ui/skeleton'
+  import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+  import { Toaster } from '@/components/ui/toast'
+  import { useToast } from '@/components/ui/toast/use-toast'
+  import {
+    DateFormatter,
+    type DateValue,
+    getLocalTimeZone,
+    today,
+    parseDate
+  } from '@internationalized/date'
 
-// Add showConfirmModal ref
-const showConfirmModal = ref(false)
+  // Add showConfirmModal ref
+  const showConfirmModal = ref(false)
 
-// Add these refs at the top with other refs
-const showDebugModal = ref(false)
-const debugData = ref<any>(null)
-const isDragging = ref<Record<number, boolean>>({})
-const dragCounter = ref<Record<number, number>>({})
+  // Add these refs at the top with other refs
+  const showDebugModal = ref(false)
+  const debugData = ref<any>(null)
+  const isDragging = ref<Record<number, boolean>>({})
+  const dragCounter = ref<Record<number, number>>({})
 
-definePageMeta({
-  layout: 'employee',
-  middleware: ['auth', 'employee']
-})
+  definePageMeta({
+    layout: 'employee',
+    middleware: ['auth', 'employee']
+  })
 
-const router = useRouter()
-const client = useSupabaseClient()
-const user = useSupabaseUser()
-const { toast } = useToast() // Change this line to destructure toast
-const loading = ref(false)
-const error = ref('')
-const uploadStatus = ref<Record<number, 'idle' | 'uploading' | 'success' | 'error'>>({})
-const uploadProgress = ref<Record<number, number>>({})
-const receiptUrls = ref<Record<number, string>>({})
-const receiptPaths = ref<Record<number, string>>({})
+  const router = useRouter()
+  const client = useSupabaseClient()
+  const user = useSupabaseUser()
+  const { toast } = useToast() // Change this line to destructure toast
+  const loading = ref(false)
+  const error = ref('')
+  const uploadStatus = ref<Record<number, 'idle' | 'uploading' | 'success' | 'error'>>({})
+  const uploadProgress = ref<Record<number, number>>({})
+  const receiptUrls = ref<Record<number, string>>({})
+  const receiptPaths = ref<Record<number, string>>({})
 
-// Get the runtime config
-const config = useRuntimeConfig()
+  // Get the runtime config
+  const config = useRuntimeConfig()
 
-// Add a ref to store the user's mileage rate
-const userMileageRate = ref(0.61) // Default fallback
+  // Add a ref to store the user's mileage rate
+  const userMileageRate = ref(0.61) // Default fallback
 
-// Add function to fetch user's mileage rate
-const fetchUserMileageRate = async () => {
-  if (!user.value) return
-  
-  try {
-    const { data, error } = await client
-      .from('users')
-      .select('mileage_rate')
-      .eq('id', user.value.id)
-      .single()
+  // Add function to fetch user's mileage rate
+  const fetchUserMileageRate = async () => {
+    if (!user.value) return
     
-    if (error) throw error
-    
-    userMileageRate.value = data.mileage_rate || 0.61
-  } catch (error) {
-    console.error('Error fetching user mileage rate:', error)
-    // Keep default rate on error
+    try {
+      const { data, error } = await client
+        .from('users')
+        .select('mileage_rate')
+        .eq('id', user.value.id)
+        .single()
+      
+      if (error) throw error
+      
+      userMileageRate.value = data.mileage_rate || 0.61
+    } catch (error) {
+      console.error('Error fetching user mileage rate:', error)
+      // Keep default rate on error
+    }
   }
-}
 
-// Define constants for mileage calculation
-// const MILEAGE_RATE = 0.61 // Remove this line
+  // Define constants for mileage calculation
+  // const MILEAGE_RATE = 0.61 // Remove this line
 
-// Add Google Maps API configuration - use API key from environment
-const GOOGLE_MAPS_API_KEY = config.public.googleMapsApiKey || ''
-let autocompleteStart = null
-let autocompleteEnd = null
-let distanceMatrixService = null
+  // Add Google Maps API configuration - use API key from environment
+  const GOOGLE_MAPS_API_KEY = config.public.googleMapsApiKey || ''
+  let autocompleteStart = null
+  let autocompleteEnd = null
+  let distanceMatrixService = null
 
-// Keep existing refs and add new ones
-const isGoogleMapsLoaded = ref(false)
-const calculatedDistance = ref(null)
-const calculatedDuration = ref(null)
+  // Keep existing refs and add new ones
+  const isGoogleMapsLoaded = ref(false)
+  const calculatedDistance = ref(null)
+  const calculatedDuration = ref(null)
 
-// Updated interface for Expense with new fields
-interface MileageEntry {
-  jobNumber: string;
-  startLocation: string;
-  destination: string;
-  distance: string;
-  date: DateValue;
-  datePopoverOpen: boolean;
-  subcategoryMappingId: string;
-}
+  // Updated interface for Expense with new fields
+  interface MileageEntry {
+    jobNumber: string;
+    startLocation: string;
+    destination: string;
+    distance: string;
+    date: DateValue;
+    datePopoverOpen: boolean;
+    subcategoryMappingId: string;
+  }
 
-interface Expense {
-  id: number
-  jobNumber: string
-  description: string
-  amount: string
-  gst_amount: string
-  pst_amount: string
-  date: DateValue
-  categoryId: string
-  subcategoryId: string
-  subcategoryMappingId: string
-  distance?: string
-  startLocation?: string
-  destination?: string
-  receipt: File | null
-  licenseNumber?: string
-  relatedEmployee?: string
-  clientName?: string
-  companyName?: string
-  isOfficeAdmin: boolean
-  isCompanyEvent: boolean
-  option?: string
-  datePopoverOpen: boolean
-  mileageEntries?: MileageEntry[]
-}
+  interface Expense {
+    id: number
+    jobNumber: string
+    description: string
+    amount: string
+    gst_amount: string
+    pst_amount: string
+    date: DateValue
+    categoryId: string
+    subcategoryId: string
+    subcategoryMappingId: string
+    distance?: string
+    startLocation?: string
+    destination?: string
+    receipt: File | null
+    licenseNumber?: string
+    relatedEmployee?: string
+    clientName?: string
+    companyName?: string
+    isOfficeAdmin: boolean
+    isCompanyEvent: boolean
+    option?: string
+    datePopoverOpen: boolean
+    mileageEntries?: MileageEntry[]
+  }
 
-// Initialize expenses array with updated structure
-const expenses = ref<Expense[]>([
-  {
-    id: 1,
-    jobNumber: '',
-    description: '',
-    amount: '',
-    gst_amount: '',
-    pst_amount: '',
-    date: today(getLocalTimeZone()),
-    categoryId: '',
-    subcategoryId: '',
-    subcategoryMappingId: '',
-    distance: '',
-    startLocation: '',
-    destination: '',
-    receipt: null,
-    licenseNumber: '',
-    relatedEmployee: '',
-    clientName: '',
-    companyName: '',
-    isOfficeAdmin: false,
-    isCompanyEvent: false,
-    datePopoverOpen: false,
-    mileageEntries: [{ 
+  // Initialize expenses array with updated structure
+  const expenses = ref<Expense[]>([
+    {
+      id: 1,
+      jobNumber: '',
+      description: '',
+      amount: '',
+      gst_amount: '',
+      pst_amount: '',
+      date: today(getLocalTimeZone()),
+      categoryId: '',
+      subcategoryId: '',
+      subcategoryMappingId: '',
+      distance: '',
+      startLocation: '',
+      destination: '',
+      receipt: null,
+      licenseNumber: '',
+      relatedEmployee: '',
+      clientName: '',
+      companyName: '',
+      isOfficeAdmin: false,
+      isCompanyEvent: false,
+      datePopoverOpen: false,
+      mileageEntries: [{ 
+        jobNumber: '',
+        startLocation: '',
+        destination: '',
+        distance: '',
+        date: today(getLocalTimeZone()),
+        datePopoverOpen: false,
+        subcategoryMappingId: '',
+      }]
+    }
+  ])
+
+  // Initialize upload status for first expense
+  uploadStatus.value[1] = 'idle'
+  uploadProgress.value[1] = 0
+
+  // Define refs for the categories and subcategories from database
+  const dbCategories = ref<any[]>([])
+  const dbSubcategories = ref<any[]>([])
+  const categoriesLoading = ref(true)
+
+  // Fetch categories and subcategories from database on component mount
+  const fetchCategories = async () => {
+    categoriesLoading.value = true
+    
+    try {
+      // Fetch categories with mappings and subcategories
+      const { data: mappingData, error: mappingError } = await client
+        .from('claim_categories')
+        .select(`
+          id,
+          category_name,
+          requires_license_number,
+          category_subcategory_mapping!inner (
+            id,
+            requires_job_number,
+            requires_employee_name,
+            requires_client_info,
+            claim_subcategories!inner (
+              id,
+              subcategory_name
+            )
+          )
+        `)
+        .order('category_name')
+      
+      if (mappingError) throw mappingError
+      
+      // Transform the data for the UI
+      dbCategories.value = mappingData.map(category => ({
+        id: category.id,
+        name: category.category_name,
+        requires_license_number: category.requires_license_number
+      }))
+      
+      // Create subcategories mapping
+      dbSubcategories.value = mappingData.flatMap(category => 
+        category.category_subcategory_mapping.map(mapping => ({
+          id: mapping.claim_subcategories.id,
+          name: mapping.claim_subcategories.subcategory_name,
+          category_id: category.id,
+          mapping_id: mapping.id,
+          requires_job_number: mapping.requires_job_number,
+          requires_employee_name: mapping.requires_employee_name,
+          requires_client_info: mapping.requires_client_info
+        }))
+      )
+      
+    } catch (err) {
+      console.error('Error fetching categories:', err)
+      error.value = 'Failed to load expense categories. Please try again.'
+    } finally {
+      categoriesLoading.value = false
+    }
+  }
+
+  // Call the fetch function when component mounts
+  onMounted(async () => {
+    await fetchUserMileageRate() // Fetch user's rate first
+    fetchCategories()
+    
+    if (!window.google) {
+      const script = document.createElement('script')
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
+      script.async = true
+      script.defer = true
+      script.onload = initGoogleMaps
+      document.head.appendChild(script)
+    } else {
+      initGoogleMaps()
+    }
+  })
+
+  // Computed property to get subcategories for selected category
+  const getSubcategories = computed(() => (expenseId: number) => {
+    const expense = expenses.value.find(e => e.id === expenseId)
+    if (!expense || !expense.categoryId) return []
+    
+    return dbSubcategories.value.filter(sc => sc.category_id === expense.categoryId)
+  })
+
+  // Updated showField function - modify to exclude job number for mileage
+  const showField = computed(() => (expenseId: number, fieldName: string) => {
+    const expense = expenses.value.find(e => e.id === expenseId)
+    if (!expense || !expense.categoryId) return false
+    
+    // Find the subcategory using the mapping ID instead of subcategory ID
+    const subcategory = dbSubcategories.value.find(sc => sc.mapping_id === expense.subcategoryMappingId)
+    if (!subcategory) return false
+    
+    const category = dbCategories.value.find(c => c.id === expense.categoryId)
+    if (!category) return false
+    
+    // Get human-readable category name for special cases
+    const categoryName = category.name.toLowerCase()
+    const subcategoryName = subcategory.name.toLowerCase()
+    
+    switch (fieldName) {
+      case 'jobNumber':
+        // Don't show job number field for mileage categories as each mileage entry has its own job number
+        if (categoryName.includes('mileage')) return false
+        
+        return subcategory.requires_job_number === true || 
+              subcategoryName.includes('jobsite') || 
+              subcategoryName.includes('tender')
+      case 'licenseNumber':
+        return categoryName.includes('vehicle') // All vehicle expenses require license number
+      case 'relatedEmployee':
+        return subcategory.requires_employee_name === true || 
+              subcategoryName.includes('employee')
+      case 'clientName':
+      case 'companyName':
+        return subcategory.requires_client_info === true || 
+              subcategoryName.includes('business development')
+      case 'isOfficeAdmin':
+        return subcategoryName.includes('office/admin') || 
+              subcategoryName.includes('admin')
+      case 'isCompanyEvent':
+        return subcategoryName.includes('company event')
+      case 'gst':
+        return true // Show GST for all categories
+      case 'pst':
+        return true // Show PST for all categories
+      default:
+        return false
+    }
+  })
+
+  // Helper function to check if location includes Vancouver
+  const isVancouverLocation = (startLocation: string, destination: string): boolean => {
+    if (!startLocation && !destination) return false
+    const start = startLocation?.toLowerCase() || ''
+    const dest = destination?.toLowerCase() || ''
+    return start.includes('vancouver') || dest.includes('vancouver')
+  }
+
+  // Update the calculation functions to use the user's rate
+  const calculateMileageAmount = (distance: string, startLocation?: string, destination?: string) => {
+    if (!distance || isNaN(parseFloat(distance))) return '0.00'
+    
+    let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
+    
+    // Add 2% extra if location includes Vancouver
+    if (startLocation && destination && isVancouverLocation(startLocation, destination)) {
+      amount = amount * 1.02
+    }
+    
+    return amount.toFixed(2)
+  }
+
+  const calculateMileageAmountForEntry = (distance: string, startLocation: string, destination: string): string => {
+    if (!distance || isNaN(parseFloat(distance))) return '0.00'
+    
+    let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
+    
+    // Add 2% extra if location includes Vancouver
+    if (isVancouverLocation(startLocation, destination)) {
+      amount = amount * 1.02
+    }
+    
+    return amount.toFixed(2)
+  }
+
+  // Update amount when distance changes for car mileage
+  const updateMileageAmount = (expenseId: number) => {
+    const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+    if (expenseIndex === -1) return
+    
+    const expense = expenses.value[expenseIndex]
+    const category = dbCategories.value.find(c => c.id === expense.categoryId)
+    
+    if (category && category.name.toLowerCase().includes('mileage')) {
+      expenses.value[expenseIndex].amount = calculateMileageAmount(expenses.value[expenseIndex].distance || '0')
+    }
+  }
+
+  // Add a new expense form with updated structure
+  const addExpense = () => {
+    const newId = expenses.value.length + 1
+    const previousExpense = expenses.value[expenses.value.length - 1]
+    
+    expenses.value.push({
+      id: newId,
+      jobNumber: '',
+      description: '',
+      amount: '',
+      gst_amount: '',
+      pst_amount: '',
+      date: previousExpense ? previousExpense.date : today(getLocalTimeZone()),
+      categoryId: '',
+      subcategoryId: '',
+      subcategoryMappingId: '',
+      distance: '',
+      startLocation: '',
+      destination: '',
+      receipt: null,
+      licenseNumber: '',
+      relatedEmployee: '',
+      clientName: '',
+      companyName: '',
+      isOfficeAdmin: false,
+      isCompanyEvent: false,
+      datePopoverOpen: false,
+      mileageEntries: [{ 
+        jobNumber: '', 
+        startLocation: '', 
+        destination: '', 
+        distance: '',
+        date: today(getLocalTimeZone()),
+        datePopoverOpen: false,
+        subcategoryMappingId: '',
+      }]
+    })
+    uploadStatus.value[newId] = 'idle'
+    uploadProgress.value[newId] = 0
+  }
+
+  // Remove an expense form
+  const removeExpense = async (id: number) => {
+    if (expenses.value.length > 1) {
+      // If there's a receipt path, delete it from Supabase storage
+      if (receiptPaths.value[id]) {
+        try {
+          const { error: deleteError } = await client.storage
+            .from('receipts')
+            .remove([receiptPaths.value[id]])
+          
+          if (deleteError) {
+            console.error('Error deleting file from storage:', deleteError)
+          }
+        } catch (err) {
+          console.error('Error during file deletion:', err)
+        }
+      }
+      
+      expenses.value = expenses.value.filter(expense => expense.id !== id)
+      delete uploadStatus.value[id]
+      delete uploadProgress.value[id]
+      delete receiptUrls.value[id]
+      delete receiptPaths.value[id]
+    }
+  }
+
+  // Add this helper function to convert HEIC files
+  const convertHeicToJpeg = async (file: File): Promise<File> => {
+    if (file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
+      // Only run on client side
+      if (typeof window !== 'undefined') {
+        try {
+          // Dynamically import heic2any only when needed
+          const { default: heic2any } = await import('heic2any')
+          
+          const convertedBlob = await heic2any({
+            blob: file,
+            toType: 'image/jpeg',
+            quality: 0.8
+          })
+          
+          // Create a new File object with the converted blob
+          const convertedFile = new File(
+            [convertedBlob as Blob], 
+            file.name.replace(/\.(heic|heif)$/i, '.jpg'),
+            { type: 'image/jpeg' }
+          )
+          
+          return convertedFile
+        } catch (error) {
+          console.error('Error converting HEIC file:', error)
+          throw new Error('Failed to convert HEIC file. Please try again.')
+        }
+      } else {
+        // On server side, just return the original file
+        return file
+      }
+    }
+    
+    return file
+  }
+
+  // Update the handleFileUpload function
+  const handleFileUpload = async (event: Event, expenseId: number) => {
+    const input = event.target as HTMLInputElement
+    if (input.files && input.files.length > 0) {
+      const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+      if (expenseIndex !== -1) {
+        try {
+          // Convert HEIC to JPEG if needed
+          const convertedFile = await convertHeicToJpeg(input.files[0])
+          expenses.value[expenseIndex].receipt = convertedFile
+          
+          // Start upload immediately
+          await uploadFile(convertedFile, expenseId)
+        } catch (error) {
+          error.value = error.message
+        }
+      }
+    }
+  }
+
+  // Upload file to Supabase storage
+  const uploadFile = async (file: File, expenseId: number): Promise<void> => {
+    if (!file) return
+    
+    try {
+      // Check if user is authenticated
+      if (!user.value) {
+        throw new Error('You must be logged in to upload files')
+      }
+      
+      uploadStatus.value[expenseId] = 'uploading'
+      uploadProgress.value[expenseId] = 0
+      
+      // Create a unique file path using user ID and timestamp
+      const filePath = `${user.value.id}/${Date.now()}-${file.name}`
+      
+      // Create a custom upload handler to track progress
+      const xhr = new XMLHttpRequest()
+      
+      // Track upload progress
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          uploadProgress.value[expenseId] = Math.round((event.loaded / event.total) * 100)
+        }
+      })
+      
+      // Create a Promise to handle the upload
+      const uploadPromise = new Promise<void>((resolve, reject) => {
+        // Use Supabase storage upload
+        client.storage
+          .from('receipts')
+          .upload(filePath, file, {
+            cacheControl: '3600',
+            upsert: false,
+            onUploadProgress: (progress) => {
+              uploadProgress.value[expenseId] = Math.round((progress.loaded / progress.total) * 100)
+            }
+          })
+          .then(({ data, error: uploadError }) => {
+            if (uploadError) {
+              uploadStatus.value[expenseId] = 'error'
+              reject(uploadError)
+              return
+            }
+            
+            // Store just the file path
+            receiptPaths.value[expenseId] = filePath
+            receiptUrls.value[expenseId] = filePath  // Store path instead of public URL
+            uploadStatus.value[expenseId] = 'success'
+            resolve()
+          })
+          .catch((err) => {
+            uploadStatus.value[expenseId] = 'error'
+            reject(err)
+          })
+      })
+      
+      // Wait for upload to complete
+      await uploadPromise
+      
+    } catch (err) {
+      console.error('Error uploading file:', err)
+      uploadStatus.value[expenseId] = 'error'
+      error.value = `Failed to upload file: ${err.message}`
+    }
+  }
+
+  // Delete file
+  const deleteFile = async (expenseId: number): Promise<void> => {
+    if (!receiptPaths.value[expenseId]) return
+    
+    try {
+      // Delete file from Supabase storage
+      const { error: deleteError } = await client.storage
+        .from('receipts')
+        .remove([receiptPaths.value[expenseId]])
+      
+      if (deleteError) {
+        throw deleteError
+      }
+      
+      // Clear local state
+      delete receiptPaths.value[expenseId]
+      delete receiptUrls.value[expenseId]
+      uploadStatus.value[expenseId] = 'idle'
+      uploadProgress.value[expenseId] = 0
+      
+      // Clear the file input
+      const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+      if (expenseIndex !== -1) {
+        expenses.value[expenseIndex].receipt = null
+      }
+      
+    } catch (err) {
+      console.error('Error deleting file:', err)
+      error.value = `Failed to delete file: ${err.message}`
+    }
+  }
+
+  // Helper function to truncate address after the first comma
+  const truncateAddress = (address) => {
+    if (!address) return '';
+    const commaIndex = address.indexOf(',');
+    return commaIndex > 0 ? address.substring(0, commaIndex) : address;
+  };
+
+  // Updated confirmSubmit function with address truncation
+  const confirmSubmit = async () => {
+    try {
+      loading.value = true;
+      
+      let allExpensesData = [];
+      
+      expenses.value.forEach(expense => {
+        const category = dbCategories.value.find(c => c.id === expense.categoryId);
+        const categoryName = category?.name.toLowerCase() || '';
+        
+        if (categoryName.includes('mileage') && expense.mileageEntries && expense.mileageEntries.length > 0) {
+          // For car mileage, create a separate expense for each entry
+          expense.mileageEntries.forEach(entry => {
+            if (!entry.distance || parseFloat(entry.distance) <= 0) {
+              return; // Skip entries with no distance
+            }
+            
+            // Calculate amount with Vancouver bonus if applicable
+            const amount = calculateMileageAmountForEntry(entry.distance, entry.startLocation, entry.destination);
+            
+            // Truncate addresses for description
+            const shortStartLocation = truncateAddress(entry.startLocation);
+            const shortDestination = truncateAddress(entry.destination);
+            
+            // Build a basic description with truncated addresses
+            let description = `Mileage: ${shortStartLocation} to ${shortDestination}`;
+            
+            // Add Vancouver bonus indicator to description if applicable
+            if (isVancouverLocation(entry.startLocation, entry.destination)) {
+              description += ' (Vancouver +2%)';
+            }
+            
+            // Add job number to description if it exists and should be shown
+            if (shouldShowJobNumber(entry.subcategoryMappingId) && entry.jobNumber) {
+              description += ` (Job #: ${entry.jobNumber})`;
+            }
+            
+            allExpensesData.push({
+              employee_id: user.value.id,
+              job_number: shouldShowJobNumber(entry.subcategoryMappingId) ? entry.jobNumber : null,
+              description: description,
+              amount: parseFloat(amount),
+              gst_amount: 0,
+              pst_amount: 0,
+              date: entry.date.toDate(getLocalTimeZone()),
+              is_travel: true,
+              travel_distance: parseFloat(entry.distance),
+              travel_type: 'car',
+              start_location: entry.startLocation, // Keep full address in the actual data field
+              destination: entry.destination, // Keep full address in the actual data field
+              receipt_url: null, // Mileage doesn't need receipts
+              status: 'pending',
+              category_id: expense.categoryId,
+              subcategory_mapping_id: entry.subcategoryMappingId,
+              license_number: expense.licenseNumber || null,
+              related_employee: null,
+              client_name: null,
+              company_name: null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+          });
+        } else {
+          // For non-mileage expenses, use the original logic
+          if (categoryName.includes('meal') && !expense.description) {
+            expense.description = 'Meal expense';
+          }
+          
+          const isTravel = categoryName.includes('travel');
+          
+          allExpensesData.push({
+            employee_id: user.value.id,
+            job_number: expense.jobNumber,
+            description: expense.description,
+            amount: parseFloat(expense.amount),
+            gst_amount: parseFloat(expense.gst_amount || '0'),
+            pst_amount: parseFloat(expense.pst_amount || '0'),
+            date: expense.date.toDate(getLocalTimeZone()),
+            is_travel: isTravel,
+            travel_distance: isTravel && expense.distance ? parseFloat(expense.distance) : null,
+            travel_type: isTravel ? 'public_transport' : null,
+            start_location: expense.startLocation,
+            destination: expense.destination,
+            receipt_url: receiptPaths.value[expense.id] || null,
+            status: 'pending',
+            category_id: expense.categoryId,
+            subcategory_mapping_id: expense.subcategoryMappingId,
+            license_number: expense.licenseNumber || null,
+            related_employee: expense.relatedEmployee || null,
+            client_name: expense.clientName || null,
+            company_name: expense.companyName || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        }
+      });
+      
+      // Submit each expense and collect their IDs
+      const submittedClaimIds = [];
+      for (const expenseData of allExpensesData) {
+        const { data: expenseResult, error: expenseError } = await client
+          .from('claims')
+          .insert(expenseData)
+          .select('id')
+          .single()
+        
+        if (expenseError) {
+          throw expenseError
+        }
+        
+        submittedClaimIds.push(expenseResult.id)
+      }
+      
+      // Send a single consolidated notification for all claims to admins AND employee
+      try {
+        const { sendEnhancedConsolidatedClaimSubmissionEmail } = await import('~/lib/notifications')
+        const notificationResult = await sendEnhancedConsolidatedClaimSubmissionEmail(
+          submittedClaimIds
+        )
+        
+        // Show success toast
+        toast({
+          title: 'Claims Submitted Successfully',
+          description: `Successfully submitted ${submittedClaimIds.length} claim${submittedClaimIds.length > 1 ? 's' : ''}`,
+          variant: 'default'
+        })
+      } catch (emailError) {
+        console.error('Failed to send email notification:', emailError)
+        toast({
+          title: 'Email Notification Error',
+          description: 'Failed to send email notifications. Claims were submitted successfully.',
+          variant: 'destructive'
+        })
+      }
+      
+      // Close modal and navigate to dashboard
+      showConfirmModal.value = false;
+      navigateTo('/e/');
+      
+    } catch (err) {
+      console.error('Error submitting expenses:', err);
+      error.value = typeof err === 'object' && err !== null && 'message' in err 
+        ? String(err.message) 
+        : 'Failed to submit expenses. Please try again.';
+      showConfirmModal.value = false;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  // Add function to cancel submission
+  const cancelSubmit = () => {
+    showConfirmModal.value = false
+  }
+
+  // Navigate back to dashboard
+  const goBack = () => {
+    navigateTo('/e/')
+  }
+
+  // For date picker
+  const formatDate = (date: Date) => {
+    return format(date, 'PPP')
+  }
+
+  // Function to initialize Google Maps and related services
+  const initGoogleMaps = () => {
+    if (window.google && window.google.maps) {
+      isGoogleMapsLoaded.value = true
+      
+      // Initialize the Distance Matrix service
+      distanceMatrixService = new window.google.maps.DistanceMatrixService()
+      
+      // Setup autocomplete 
+      // We'll call this whenever a car expense is visible
+      setupAutocomplete()
+
+      // Watch for category changes to initialize autocomplete when car is selected
+      watch(expenses, (newExpenses) => {
+        // Check if any expense is a car expense
+        const hasMileage = newExpenses.some(e => {
+          const category = dbCategories.value.find(c => c.id === e.categoryId)
+          return category && category.name.toLowerCase().includes('mileage')
+        })
+        
+        if (hasMileage) {
+          // Wait for DOM to update before initializing autocomplete
+          nextTick(() => {
+            setupAutocomplete()
+          })
+        }
+      }, { deep: true })
+    }
+  }
+
+  // Modified function to setup the Google Places Autocomplete
+  const setupAutocomplete = () => {
+    nextTick(() => {
+      try {
+        // Find all car mileage expenses
+        const mileageExpenses = expenses.value.filter(e => {
+          const category = dbCategories.value.find(c => c.id === e.categoryId)
+          return category && category.name.toLowerCase().includes('mileage')
+        })
+        
+        // Initialize autocomplete for each mileage expense entry
+        mileageExpenses.forEach(expense => {
+          if (!expense.mileageEntries) return
+          
+          expense.mileageEntries.forEach((entry, entryIndex) => {
+            const startInput = document.getElementById(`startLocation-${expense.id}-${entryIndex}`)
+            const endInput = document.getElementById(`destination-${expense.id}-${entryIndex}`)
+            
+            // Only proceed if both inputs exist for this entry
+            if (!startInput || !endInput) return
+            
+            // Initialize start location autocomplete
+            if (!startInput.getAttribute('data-autocomplete-initialized')) {
+              const options = {
+                types: ['address'],
+                componentRestrictions: { country: 'ca' }
+              }
+              
+              const autoStart = new window.google.maps.places.Autocomplete(startInput, options)
+              startInput.setAttribute('data-autocomplete-initialized', 'true')
+              
+              autoStart.addListener('place_changed', () => {
+                const place = autoStart.getPlace()
+                if (place && place.formatted_address) {
+                  // Update this specific entry's startLocation
+                  const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
+                  if (expenseIndex !== -1 && expenses.value[expenseIndex].mileageEntries) {
+                    expenses.value[expenseIndex].mileageEntries[entryIndex].startLocation = place.formatted_address
+                  }
+                  calculateDistanceForEntry(expense.id, entryIndex)
+                }
+              })
+            }
+            
+            // Initialize destination autocomplete
+            if (!endInput.getAttribute('data-autocomplete-initialized')) {
+              const options = {
+                types: ['address'],
+                componentRestrictions: { country: 'ca' }
+              }
+              
+              const autoEnd = new window.google.maps.places.Autocomplete(endInput, options)
+              endInput.setAttribute('data-autocomplete-initialized', 'true')
+              
+              autoEnd.addListener('place_changed', () => {
+                const place = autoEnd.getPlace()
+                if (place && place.formatted_address) {
+                  // Update this specific entry's destination
+                  const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
+                  if (expenseIndex !== -1 && expenses.value[expenseIndex].mileageEntries) {
+                    expenses.value[expenseIndex].mileageEntries[entryIndex].destination = place.formatted_address
+                  }
+                  calculateDistanceForEntry(expense.id, entryIndex)
+                }
+              })
+            }
+          })
+        })
+      } catch (error) {
+        console.error("Error setting up autocomplete:", error)
+      }
+    })
+  }
+
+  // New function to calculate distance for a specific mileage entry
+  const calculateDistanceForEntry = (expenseId, entryIndex) => {
+    if (!distanceMatrixService) return
+    
+    // Get the expense and entry
+    const expense = expenses.value.find(e => e.id === expenseId)
+    if (!expense || !expense.mileageEntries || !expense.mileageEntries[entryIndex]) return
+    
+    const entry = expense.mileageEntries[entryIndex]
+    
+    // Only calculate if both addresses have values
+    if (entry.startLocation && entry.destination) {
+      const request = {
+        origins: [entry.startLocation],
+        destinations: [entry.destination],
+        travelMode: 'DRIVING',
+        unitSystem: window.google.maps.UnitSystem.METRIC
+      }
+      
+      distanceMatrixService.getDistanceMatrix(request, (response, status) => {
+        if (status === 'OK') {
+          const results = response.rows[0].elements[0]
+          if (results.status === 'OK') {
+            // Get distance in kilometers
+            const distanceInMeters = results.distance.value
+            const distanceInKm = distanceInMeters / 1000
+            
+            // Update the distance field for this specific entry
+            const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+            if (expenseIndex !== -1 && expenses.value[expenseIndex].mileageEntries) {
+              expenses.value[expenseIndex].mileageEntries[entryIndex].distance = distanceInKm.toFixed(2)
+              updateMileageTotals(expenseId)
+            }
+          }
+        }
+      })
+    }
+  }
+
+  // Load Google Maps API script
+  onMounted(() => {
+    if (!window.google) {
+      const script = document.createElement('script')
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
+      script.async = true
+      script.defer = true
+      script.onload = initGoogleMaps
+      document.head.appendChild(script)
+    } else {
+      initGoogleMaps()
+    }
+  })
+
+  // Add the missing requiresReceipt computed property
+  const requiresReceipt = computed(() => (expenseId: number) => {
+    const expense = expenses.value.find(e => e.id === expenseId)
+    if (!expense || !expense.categoryId) return true
+    
+    // Get category name
+    const category = dbCategories.value.find(c => c.id === expense.categoryId)
+    if (!category) return true
+    
+    // Mileage categories don't require receipts
+    return !category.name.toLowerCase().includes('mileage')
+  })
+
+  // Calculate total amount (excluding tax)
+  const totalAmount = computed(() => {
+    return expenses.value.reduce((sum, expense) => {
+      const amount = parseFloat(expense.amount) || 0
+      return sum + amount
+    }, 0).toFixed(2)
+  })
+
+  // Calculate total GST
+  const totalGST = computed(() => {
+    return expenses.value.reduce((sum, expense) => {
+      const gst = parseFloat(expense.gst_amount) || 0
+      return sum + gst
+    }, 0).toFixed(2)
+  })
+
+  // Calculate total PST
+  const totalPST = computed(() => {
+    return expenses.value.reduce((sum, expense) => {
+      const pst = parseFloat(expense.pst_amount) || 0
+      return sum + pst
+    }, 0).toFixed(2)
+  })
+
+  // Add function to calculate GST for parking expenses
+  const calculateParkingGST = (amount: string): string => {
+    if (!amount || isNaN(parseFloat(amount))) return '0.00'
+    return ((parseFloat(amount) / 1.29) * 0.05).toFixed(2)
+  }
+
+  // Update the handleCategoryChange function to calculate GST for parking
+  const handleCategoryChange = (expenseId: number) => {
+    const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+    if (expenseIndex === -1) return
+    
+    const expense = expenses.value[expenseIndex]
+    const category = dbCategories.value.find(c => c.id === expense.categoryId)
+    
+    if (category) {
+      const categoryName = category.name.toLowerCase()
+      
+      // If it's a parking category, calculate GST based on the provided formula
+      if (categoryName.includes('parking') && expense.amount) {
+        expenses.value[expenseIndex].gst_amount = calculateParkingGST(expense.amount)
+      }
+    }
+  }
+
+  // Update the grand total calculation to only use the total amounts
+  const grandTotal = computed(() => {
+    return expenses.value.reduce((sum, expense) => {
+      const amount = parseFloat(expense.amount) || 0
+      return sum + amount
+    }, 0).toFixed(2)
+  })
+
+  const df = new DateFormatter('en-US', {
+    dateStyle: 'long',
+  })
+
+  // Add a function to add mileage entry
+  const addMileageEntry = (expenseId: number) => {
+    const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+    if (expenseIndex === -1) return
+    
+    // Initialize array if it doesn't exist
+    if (!expenses.value[expenseIndex].mileageEntries) {
+      expenses.value[expenseIndex].mileageEntries = []
+    }
+    
+    // Add new entry with today's date and copy the subcategory from previous entry if available
+    const previousSubcategoryId = expenses.value[expenseIndex].mileageEntries.length > 0 
+      ? expenses.value[expenseIndex].mileageEntries[expenses.value[expenseIndex].mileageEntries.length - 1].subcategoryMappingId 
+      : '';
+    
+    // Create a new DateValue using today() from @internationalized/date
+    const todayDate = today(getLocalTimeZone())
+    
+    expenses.value[expenseIndex].mileageEntries.push({
       jobNumber: '',
       startLocation: '',
       destination: '',
       distance: '',
-      date: today(getLocalTimeZone()),
+      date: todayDate, // Use the DateValue directly
       datePopoverOpen: false,
-      subcategoryMappingId: '',
-    }]
-  }
-])
-
-// Initialize upload status for first expense
-uploadStatus.value[1] = 'idle'
-uploadProgress.value[1] = 0
-
-// Define refs for the categories and subcategories from database
-const dbCategories = ref<any[]>([])
-const dbSubcategories = ref<any[]>([])
-const categoriesLoading = ref(true)
-
-// Fetch categories and subcategories from database on component mount
-const fetchCategories = async () => {
-  categoriesLoading.value = true
-  
-  try {
-    // Fetch categories with mappings and subcategories
-    const { data: mappingData, error: mappingError } = await client
-      .from('claim_categories')
-      .select(`
-        id,
-        category_name,
-        requires_license_number,
-        category_subcategory_mapping!inner (
-          id,
-          requires_job_number,
-          requires_employee_name,
-          requires_client_info,
-          claim_subcategories!inner (
-            id,
-            subcategory_name
-          )
-        )
-      `)
-      .order('category_name')
-    
-    if (mappingError) throw mappingError
-    
-    // Transform the data for the UI
-    dbCategories.value = mappingData.map(category => ({
-      id: category.id,
-      name: category.category_name,
-      requires_license_number: category.requires_license_number
-    }))
-    
-    // Create subcategories mapping
-    dbSubcategories.value = mappingData.flatMap(category => 
-      category.category_subcategory_mapping.map(mapping => ({
-        id: mapping.claim_subcategories.id,
-        name: mapping.claim_subcategories.subcategory_name,
-        category_id: category.id,
-        mapping_id: mapping.id,
-        requires_job_number: mapping.requires_job_number,
-        requires_employee_name: mapping.requires_employee_name,
-        requires_client_info: mapping.requires_client_info
-      }))
-    )
-    
-  } catch (err) {
-    console.error('Error fetching categories:', err)
-    error.value = 'Failed to load expense categories. Please try again.'
-  } finally {
-    categoriesLoading.value = false
-  }
-}
-
-// Call the fetch function when component mounts
-onMounted(async () => {
-  await fetchUserMileageRate() // Fetch user's rate first
-  fetchCategories()
-  
-  if (!window.google) {
-    const script = document.createElement('script')
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
-    script.async = true
-    script.defer = true
-    script.onload = initGoogleMaps
-    document.head.appendChild(script)
-  } else {
-    initGoogleMaps()
-  }
-})
-
-// Computed property to get subcategories for selected category
-const getSubcategories = computed(() => (expenseId: number) => {
-  const expense = expenses.value.find(e => e.id === expenseId)
-  if (!expense || !expense.categoryId) return []
-  
-  return dbSubcategories.value.filter(sc => sc.category_id === expense.categoryId)
-})
-
-// Updated showField function - modify to exclude job number for mileage
-const showField = computed(() => (expenseId: number, fieldName: string) => {
-  const expense = expenses.value.find(e => e.id === expenseId)
-  if (!expense || !expense.categoryId) return false
-  
-  // Find the subcategory using the mapping ID instead of subcategory ID
-  const subcategory = dbSubcategories.value.find(sc => sc.mapping_id === expense.subcategoryMappingId)
-  if (!subcategory) return false
-  
-  const category = dbCategories.value.find(c => c.id === expense.categoryId)
-  if (!category) return false
-  
-  // Get human-readable category name for special cases
-  const categoryName = category.name.toLowerCase()
-  const subcategoryName = subcategory.name.toLowerCase()
-  
-  switch (fieldName) {
-    case 'jobNumber':
-      // Don't show job number field for mileage categories as each mileage entry has its own job number
-      if (categoryName.includes('mileage')) return false
-      
-      return subcategory.requires_job_number === true || 
-             subcategoryName.includes('jobsite') || 
-             subcategoryName.includes('tender')
-    case 'licenseNumber':
-      return categoryName.includes('vehicle') // All vehicle expenses require license number
-    case 'relatedEmployee':
-      return subcategory.requires_employee_name === true || 
-             subcategoryName.includes('employee')
-    case 'clientName':
-    case 'companyName':
-      return subcategory.requires_client_info === true || 
-             subcategoryName.includes('business development')
-    case 'isOfficeAdmin':
-      return subcategoryName.includes('office/admin') || 
-             subcategoryName.includes('admin')
-    case 'isCompanyEvent':
-      return subcategoryName.includes('company event')
-    case 'gst':
-      return true // Show GST for all categories
-    case 'pst':
-      return true // Show PST for all categories
-    default:
-      return false
-  }
-})
-
-// Helper function to check if location includes Vancouver
-const isVancouverLocation = (startLocation: string, destination: string): boolean => {
-  if (!startLocation && !destination) return false
-  const start = startLocation?.toLowerCase() || ''
-  const dest = destination?.toLowerCase() || ''
-  return start.includes('vancouver') || dest.includes('vancouver')
-}
-
-// Update the calculation functions to use the user's rate
-const calculateMileageAmount = (distance: string, startLocation?: string, destination?: string) => {
-  if (!distance || isNaN(parseFloat(distance))) return '0.00'
-  
-  let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
-  
-  // Add 2% extra if location includes Vancouver
-  if (startLocation && destination && isVancouverLocation(startLocation, destination)) {
-    amount = amount * 1.02
-  }
-  
-  return amount.toFixed(2)
-}
-
-const calculateMileageAmountForEntry = (distance: string, startLocation: string, destination: string): string => {
-  if (!distance || isNaN(parseFloat(distance))) return '0.00'
-  
-  let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
-  
-  // Add 2% extra if location includes Vancouver
-  if (isVancouverLocation(startLocation, destination)) {
-    amount = amount * 1.02
-  }
-  
-  return amount.toFixed(2)
-}
-
-// Update amount when distance changes for car mileage
-const updateMileageAmount = (expenseId: number) => {
-  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-  if (expenseIndex === -1) return
-  
-  const expense = expenses.value[expenseIndex]
-  const category = dbCategories.value.find(c => c.id === expense.categoryId)
-  
-  if (category && category.name.toLowerCase().includes('mileage')) {
-    expenses.value[expenseIndex].amount = calculateMileageAmount(expenses.value[expenseIndex].distance || '0')
-  }
-}
-
-// Add a new expense form with updated structure
-const addExpense = () => {
-  const newId = expenses.value.length + 1
-  const previousExpense = expenses.value[expenses.value.length - 1]
-  
-  expenses.value.push({
-    id: newId,
-    jobNumber: '',
-    description: '',
-    amount: '',
-    gst_amount: '',
-    pst_amount: '',
-    date: previousExpense ? previousExpense.date : today(getLocalTimeZone()),
-    categoryId: '',
-    subcategoryId: '',
-    subcategoryMappingId: '',
-    distance: '',
-    startLocation: '',
-    destination: '',
-    receipt: null,
-    licenseNumber: '',
-    relatedEmployee: '',
-    clientName: '',
-    companyName: '',
-    isOfficeAdmin: false,
-    isCompanyEvent: false,
-    datePopoverOpen: false,
-    mileageEntries: [{ 
-      jobNumber: '', 
-      startLocation: '', 
-      destination: '', 
-      distance: '',
-      date: today(getLocalTimeZone()),
-      datePopoverOpen: false,
-      subcategoryMappingId: '',
-    }]
-  })
-  uploadStatus.value[newId] = 'idle'
-  uploadProgress.value[newId] = 0
-}
-
-// Remove an expense form
-const removeExpense = async (id: number) => {
-  if (expenses.value.length > 1) {
-    // If there's a receipt path, delete it from Supabase storage
-    if (receiptPaths.value[id]) {
-      try {
-        const { error: deleteError } = await client.storage
-          .from('receipts')
-          .remove([receiptPaths.value[id]])
-        
-        if (deleteError) {
-          console.error('Error deleting file from storage:', deleteError)
-        }
-      } catch (err) {
-        console.error('Error during file deletion:', err)
-      }
-    }
-    
-    expenses.value = expenses.value.filter(expense => expense.id !== id)
-    delete uploadStatus.value[id]
-    delete uploadProgress.value[id]
-    delete receiptUrls.value[id]
-    delete receiptPaths.value[id]
-  }
-}
-
-// Add this helper function to convert HEIC files
-const convertHeicToJpeg = async (file: File): Promise<File> => {
-  if (file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
-    // Only run on client side
-    if (typeof window !== 'undefined') {
-      try {
-        // Dynamically import heic2any only when needed
-        const { default: heic2any } = await import('heic2any')
-        
-        const convertedBlob = await heic2any({
-          blob: file,
-          toType: 'image/jpeg',
-          quality: 0.8
-        })
-        
-        // Create a new File object with the converted blob
-        const convertedFile = new File(
-          [convertedBlob as Blob], 
-          file.name.replace(/\.(heic|heif)$/i, '.jpg'),
-          { type: 'image/jpeg' }
-        )
-        
-        return convertedFile
-      } catch (error) {
-        console.error('Error converting HEIC file:', error)
-        throw new Error('Failed to convert HEIC file. Please try again.')
-      }
-    } else {
-      // On server side, just return the original file
-      return file
-    }
-  }
-  
-  return file
-}
-
-// Update the handleFileUpload function
-const handleFileUpload = async (event: Event, expenseId: number) => {
-  const input = event.target as HTMLInputElement
-  if (input.files && input.files.length > 0) {
-    const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-    if (expenseIndex !== -1) {
-      try {
-        // Convert HEIC to JPEG if needed
-        const convertedFile = await convertHeicToJpeg(input.files[0])
-        expenses.value[expenseIndex].receipt = convertedFile
-        
-        // Start upload immediately
-        await uploadFile(convertedFile, expenseId)
-      } catch (error) {
-        error.value = error.message
-      }
-    }
-  }
-}
-
-// Upload file to Supabase storage
-const uploadFile = async (file: File, expenseId: number): Promise<void> => {
-  if (!file) return
-  
-  try {
-    // Check if user is authenticated
-    if (!user.value) {
-      throw new Error('You must be logged in to upload files')
-    }
-    
-    uploadStatus.value[expenseId] = 'uploading'
-    uploadProgress.value[expenseId] = 0
-    
-    // Create a unique file path using user ID and timestamp
-    const filePath = `${user.value.id}/${Date.now()}-${file.name}`
-    
-    // Create a custom upload handler to track progress
-    const xhr = new XMLHttpRequest()
-    
-    // Track upload progress
-    xhr.upload.addEventListener('progress', (event) => {
-      if (event.lengthComputable) {
-        uploadProgress.value[expenseId] = Math.round((event.loaded / event.total) * 100)
-      }
+      subcategoryMappingId: previousSubcategoryId
     })
     
-    // Create a Promise to handle the upload
-    const uploadPromise = new Promise<void>((resolve, reject) => {
-      // Use Supabase storage upload
-      client.storage
-        .from('receipts')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false,
-          onUploadProgress: (progress) => {
-            uploadProgress.value[expenseId] = Math.round((progress.loaded / progress.total) * 100)
-          }
-        })
-        .then(({ data, error: uploadError }) => {
-          if (uploadError) {
-            uploadStatus.value[expenseId] = 'error'
-            reject(uploadError)
-            return
-          }
-          
-          // Store just the file path
-          receiptPaths.value[expenseId] = filePath
-          receiptUrls.value[expenseId] = filePath  // Store path instead of public URL
-          uploadStatus.value[expenseId] = 'success'
-          resolve()
-        })
-        .catch((err) => {
-          uploadStatus.value[expenseId] = 'error'
-          reject(err)
-        })
+    // Setup autocomplete for new fields
+    nextTick(() => {
+      setupAutocomplete()
     })
-    
-    // Wait for upload to complete
-    await uploadPromise
-    
-  } catch (err) {
-    console.error('Error uploading file:', err)
-    uploadStatus.value[expenseId] = 'error'
-    error.value = `Failed to upload file: ${err.message}`
   }
-}
 
-// Delete file
-const deleteFile = async (expenseId: number): Promise<void> => {
-  if (!receiptPaths.value[expenseId]) return
-  
-  try {
-    // Delete file from Supabase storage
-    const { error: deleteError } = await client.storage
-      .from('receipts')
-      .remove([receiptPaths.value[expenseId]])
-    
-    if (deleteError) {
-      throw deleteError
-    }
-    
-    // Clear local state
-    delete receiptPaths.value[expenseId]
-    delete receiptUrls.value[expenseId]
-    uploadStatus.value[expenseId] = 'idle'
-    uploadProgress.value[expenseId] = 0
-    
-    // Clear the file input
+  // Add a function to remove mileage entry
+  const removeMileageEntry = (expenseId: number, entryIndex: number) => {
     const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-    if (expenseIndex !== -1) {
-      expenses.value[expenseIndex].receipt = null
+    if (expenseIndex === -1) return
+    
+    // Only remove if there's more than one
+    if (expenses.value[expenseIndex].mileageEntries.length > 1) {
+      expenses.value[expenseIndex].mileageEntries.splice(entryIndex, 1)
+      updateMileageTotals(expenseId)
     }
-    
-  } catch (err) {
-    console.error('Error deleting file:', err)
-    error.value = `Failed to delete file: ${err.message}`
   }
-}
 
-// Helper function to truncate address after the first comma
-const truncateAddress = (address) => {
-  if (!address) return '';
-  const commaIndex = address.indexOf(',');
-  return commaIndex > 0 ? address.substring(0, commaIndex) : address;
-};
+  // Add function to calculate total distance
+  const calculateTotalDistance = (expenseId: number) => {
+    const expense = expenses.value.find(e => e.id === expenseId)
+    if (!expense || !expense.mileageEntries) return '0'
+    
+    const total = expense.mileageEntries.reduce((sum, entry) => {
+      return sum + (parseFloat(entry.distance) || 0)
+    }, 0)
+    
+    return total.toFixed(2)
+  }
 
-// Updated confirmSubmit function with address truncation
-const confirmSubmit = async () => {
-  try {
-    loading.value = true;
+  // Update the mileage totals and calculate amount with Vancouver bonus
+  const updateMileageTotals = (expenseId: number) => {
+    const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+    if (expenseIndex === -1) return
     
-    let allExpensesData = [];
+    const expense = expenses.value[expenseIndex]
+    if (!expense.mileageEntries) return
     
-    expenses.value.forEach(expense => {
+    // Calculate total amount for all entries, including Vancouver bonus
+    const totalAmount = expense.mileageEntries.reduce((sum, entry) => {
+      if (!entry.distance || parseFloat(entry.distance) <= 0) return sum
+      const entryAmount = parseFloat(calculateMileageAmountForEntry(entry.distance, entry.startLocation, entry.destination))
+      return sum + entryAmount
+    }, 0)
+    
+    const totalDistance = calculateTotalDistance(expenseId)
+    expenses.value[expenseIndex].distance = totalDistance
+    expenses.value[expenseIndex].amount = totalAmount.toFixed(2)
+  }
+
+  // Add string date handling for simpler input
+  const updateEntryDateFromString = (expenseId: number, entryIndex: number) => {
+    const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+    if (expenseIndex === -1 || !expenses.value[expenseIndex].mileageEntries) return
+    
+    const entry = expenses.value[expenseIndex].mileageEntries[entryIndex]
+    if (entry.dateString) {
+      entry.date = new Date(entry.dateString)
+    }
+  }
+
+  // Helper function to check if job number should be shown for a subcategory
+  const shouldShowJobNumber = (subcategoryMappingId: string) => {
+    if (!subcategoryMappingId) return false
+    
+    const subcategory = dbSubcategories.value.find(sc => sc.mapping_id === subcategoryMappingId)
+    if (!subcategory) return false
+    
+    // Check if subcategory name contains jobsite or tender
+    const subcategoryName = subcategory.name.toLowerCase()
+    return subcategoryName.includes('jobsite') || 
+          subcategoryName.includes('tender') || 
+          subcategory.requires_job_number === true
+  }
+
+  // Add a computed property to count total claims
+  const totalClaimsCount = computed(() => {
+    return expenses.value.reduce((total, expense) => {
+      // If it's a mileage expense with multiple entries, count those entries
       const category = dbCategories.value.find(c => c.id === expense.categoryId);
-      const categoryName = category?.name.toLowerCase() || '';
-      
-      if (categoryName.includes('mileage') && expense.mileageEntries && expense.mileageEntries.length > 0) {
-        // For car mileage, create a separate expense for each entry
-        expense.mileageEntries.forEach(entry => {
-          if (!entry.distance || parseFloat(entry.distance) <= 0) {
-            return; // Skip entries with no distance
-          }
-          
-          // Calculate amount with Vancouver bonus if applicable
-          const amount = calculateMileageAmountForEntry(entry.distance, entry.startLocation, entry.destination);
-          
-          // Truncate addresses for description
-          const shortStartLocation = truncateAddress(entry.startLocation);
-          const shortDestination = truncateAddress(entry.destination);
-          
-          // Build a basic description with truncated addresses
-          let description = `Mileage: ${shortStartLocation} to ${shortDestination}`;
-          
-          // Add Vancouver bonus indicator to description if applicable
-          if (isVancouverLocation(entry.startLocation, entry.destination)) {
-            description += ' (Vancouver +2%)';
-          }
-          
-          // Add job number to description if it exists and should be shown
-          if (shouldShowJobNumber(entry.subcategoryMappingId) && entry.jobNumber) {
-            description += ` (Job #: ${entry.jobNumber})`;
-          }
-          
-          allExpensesData.push({
-            employee_id: user.value.id,
-            job_number: shouldShowJobNumber(entry.subcategoryMappingId) ? entry.jobNumber : null,
-            description: description,
-            amount: parseFloat(amount),
-            gst_amount: 0,
-            pst_amount: 0,
-            date: entry.date.toDate(getLocalTimeZone()),
-            is_travel: true,
-            travel_distance: parseFloat(entry.distance),
-            travel_type: 'car',
-            start_location: entry.startLocation, // Keep full address in the actual data field
-            destination: entry.destination, // Keep full address in the actual data field
-            receipt_url: null, // Mileage doesn't need receipts
-            status: 'pending',
-            category_id: expense.categoryId,
-            subcategory_mapping_id: entry.subcategoryMappingId,
-            license_number: expense.licenseNumber || null,
-            related_employee: null,
-            client_name: null,
-            company_name: null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-        });
-      } else {
-        // For non-mileage expenses, use the original logic
-        if (categoryName.includes('meal') && !expense.description) {
-          expense.description = 'Meal expense';
+      if (category && category.name.toLowerCase().includes('mileage') && expense.mileageEntries) {
+        // Only count entries that have distance (valid entries)
+        return total + expense.mileageEntries.filter(entry => entry.distance && parseFloat(entry.distance) > 0).length;
+      }
+      // For non-mileage expenses, count as 1
+      return total + 1;
+    }, 0);
+  });
+
+  // Add these methods after the existing file handling methods
+  const handleDragEnter = (event: DragEvent, expenseId: number) => {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    if (!dragCounter.value[expenseId]) {
+      dragCounter.value[expenseId] = 0
+    }
+    dragCounter.value[expenseId]++
+    isDragging.value[expenseId] = true
+  }
+
+  const handleDragLeave = (event: DragEvent, expenseId: number) => {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    dragCounter.value[expenseId]--
+    if (dragCounter.value[expenseId] === 0) {
+      isDragging.value[expenseId] = false
+    }
+  }
+
+  const handleDragOver = (event: DragEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  const handleDrop = async (event: DragEvent, expenseId: number) => {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    isDragging.value[expenseId] = false
+    dragCounter.value[expenseId] = 0
+    
+    const files = event.dataTransfer?.files
+    if (files && files.length > 0) {
+      const file = files[0]
+      const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+      if (expenseIndex !== -1) {
+        try {
+          // Convert HEIC to JPEG if needed
+          const convertedFile = await convertHeicToJpeg(file)
+          expenses.value[expenseIndex].receipt = convertedFile
+          await uploadFile(convertedFile, expenseId)
+        } catch (error) {
+          error.value = error.message
         }
-        
-        const isTravel = categoryName.includes('travel');
-        
-        allExpensesData.push({
-          employee_id: user.value.id,
-          job_number: expense.jobNumber,
-          description: expense.description,
-          amount: parseFloat(expense.amount),
-          gst_amount: parseFloat(expense.gst_amount || '0'),
-          pst_amount: parseFloat(expense.pst_amount || '0'),
-          date: expense.date.toDate(getLocalTimeZone()),
-          is_travel: isTravel,
-          travel_distance: isTravel && expense.distance ? parseFloat(expense.distance) : null,
-          travel_type: isTravel ? 'public_transport' : null,
-          start_location: expense.startLocation,
-          destination: expense.destination,
-          receipt_url: receiptPaths.value[expense.id] || null,
-          status: 'pending',
-          category_id: expense.categoryId,
-          subcategory_mapping_id: expense.subcategoryMappingId,
-          license_number: expense.licenseNumber || null,
-          related_employee: expense.relatedEmployee || null,
-          client_name: expense.clientName || null,
-          company_name: expense.companyName || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
       }
-    });
-    
-    // Submit each expense and collect their IDs
-    const submittedClaimIds = [];
-    for (const expenseData of allExpensesData) {
-      const { data: expenseResult, error: expenseError } = await client
-        .from('claims')
-        .insert(expenseData)
-        .select('id')
-        .single()
-      
-      if (expenseError) {
-        throw expenseError
-      }
-      
-      submittedClaimIds.push(expenseResult.id)
     }
-    
-    // Send a single consolidated notification for all claims to admins AND employee
-    try {
-      const { sendEnhancedConsolidatedClaimSubmissionEmail } = await import('~/lib/notifications')
-      const notificationResult = await sendEnhancedConsolidatedClaimSubmissionEmail(
-        submittedClaimIds
-      )
-      
-      // Show success toast
-      toast({
-        title: 'Claims Submitted Successfully',
-        description: `Successfully submitted ${submittedClaimIds.length} claim${submittedClaimIds.length > 1 ? 's' : ''}`,
-        variant: 'default'
-      })
-    } catch (emailError) {
-      console.error('Failed to send email notification:', emailError)
-      toast({
-        title: 'Email Notification Error',
-        description: 'Failed to send email notifications. Claims were submitted successfully.',
-        variant: 'destructive'
-      })
-    }
-    
-    // Close modal and navigate to dashboard
-    showConfirmModal.value = false;
-    navigateTo('/e/');
-    
-  } catch (err) {
-    console.error('Error submitting expenses:', err);
-    error.value = typeof err === 'object' && err !== null && 'message' in err 
-      ? String(err.message) 
-      : 'Failed to submit expenses. Please try again.';
-    showConfirmModal.value = false;
-  } finally {
-    loading.value = false;
   }
-}
 
-// Add function to cancel submission
-const cancelSubmit = () => {
-  showConfirmModal.value = false
-}
-
-// Navigate back to dashboard
-const goBack = () => {
-  navigateTo('/e/')
-}
-
-// For date picker
-const formatDate = (date: Date) => {
-  return format(date, 'PPP')
-}
-
-// Function to initialize Google Maps and related services
-const initGoogleMaps = () => {
-  if (window.google && window.google.maps) {
-    isGoogleMapsLoaded.value = true
+  // Helper function to calculate the deadline for a given expense date
+  const calculateClaimDeadline = (expenseDate: DateValue): Date => {
+    const expenseJSDate = expenseDate.toDate(getLocalTimeZone())
+    const expenseMonth = expenseJSDate.getMonth()
+    const expenseYear = expenseJSDate.getFullYear()
     
-    // Initialize the Distance Matrix service
-    distanceMatrixService = new window.google.maps.DistanceMatrixService()
+    // Calculate next month and year
+    let nextMonth = expenseMonth + 1
+    let nextYear = expenseYear
     
-    // Setup autocomplete 
-    // We'll call this whenever a car expense is visible
-    setupAutocomplete()
-
-    // Watch for category changes to initialize autocomplete when car is selected
-    watch(expenses, (newExpenses) => {
-      // Check if any expense is a car expense
-      const hasMileage = newExpenses.some(e => {
-        const category = dbCategories.value.find(c => c.id === e.categoryId)
-        return category && category.name.toLowerCase().includes('mileage')
-      })
-      
-      if (hasMileage) {
-        // Wait for DOM to update before initializing autocomplete
-        nextTick(() => {
-          setupAutocomplete()
-        })
-      }
-    }, { deep: true })
-  }
-}
-
-// Modified function to setup the Google Places Autocomplete
-const setupAutocomplete = () => {
-  nextTick(() => {
-    try {
-      // Find all car mileage expenses
-      const mileageExpenses = expenses.value.filter(e => {
-        const category = dbCategories.value.find(c => c.id === e.categoryId)
-        return category && category.name.toLowerCase().includes('mileage')
-      })
-      
-      // Initialize autocomplete for each mileage expense entry
-      mileageExpenses.forEach(expense => {
-        if (!expense.mileageEntries) return
-        
-        expense.mileageEntries.forEach((entry, entryIndex) => {
-          const startInput = document.getElementById(`startLocation-${expense.id}-${entryIndex}`)
-          const endInput = document.getElementById(`destination-${expense.id}-${entryIndex}`)
-          
-          // Only proceed if both inputs exist for this entry
-          if (!startInput || !endInput) return
-          
-          // Initialize start location autocomplete
-          if (!startInput.getAttribute('data-autocomplete-initialized')) {
-            const options = {
-              types: ['address'],
-              componentRestrictions: { country: 'ca' }
-            }
-            
-            const autoStart = new window.google.maps.places.Autocomplete(startInput, options)
-            startInput.setAttribute('data-autocomplete-initialized', 'true')
-            
-            autoStart.addListener('place_changed', () => {
-              const place = autoStart.getPlace()
-              if (place && place.formatted_address) {
-                // Update this specific entry's startLocation
-                const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
-                if (expenseIndex !== -1 && expenses.value[expenseIndex].mileageEntries) {
-                  expenses.value[expenseIndex].mileageEntries[entryIndex].startLocation = place.formatted_address
-                }
-                calculateDistanceForEntry(expense.id, entryIndex)
-              }
-            })
-          }
-          
-          // Initialize destination autocomplete
-          if (!endInput.getAttribute('data-autocomplete-initialized')) {
-            const options = {
-              types: ['address'],
-              componentRestrictions: { country: 'ca' }
-            }
-            
-            const autoEnd = new window.google.maps.places.Autocomplete(endInput, options)
-            endInput.setAttribute('data-autocomplete-initialized', 'true')
-            
-            autoEnd.addListener('place_changed', () => {
-              const place = autoEnd.getPlace()
-              if (place && place.formatted_address) {
-                // Update this specific entry's destination
-                const expenseIndex = expenses.value.findIndex(e => e.id === expense.id)
-                if (expenseIndex !== -1 && expenses.value[expenseIndex].mileageEntries) {
-                  expenses.value[expenseIndex].mileageEntries[entryIndex].destination = place.formatted_address
-                }
-                calculateDistanceForEntry(expense.id, entryIndex)
-              }
-            })
-          }
-        })
-      })
-    } catch (error) {
-      console.error("Error setting up autocomplete:", error)
+    if (nextMonth > 11) {
+      nextMonth = 0
+      nextYear++
     }
+    
+    // Deadline is 7 days into the next month
+    return new Date(nextYear, nextMonth, 7, 23, 59, 59)
+  }
+
+  // Computed property to check if any claims are late
+  const hasLateClaims = computed(() => {
+    const today = new Date()
+    
+    for (const expense of expenses.value) {
+      const category = dbCategories.value.find(c => c.id === expense.categoryId)
+      const categoryName = category?.name.toLowerCase() || ''
+      
+      if (categoryName.includes('mileage') && expense.mileageEntries) {
+        // Check each mileage entry
+        for (const entry of expense.mileageEntries) {
+          if (entry.date && entry.distance && parseFloat(entry.distance) > 0) {
+            const deadline = calculateClaimDeadline(entry.date)
+            if (today > deadline) {
+              return true
+            }
+          }
+        }
+      } else if (expense.date) {
+        // Check regular expense
+        const deadline = calculateClaimDeadline(expense.date)
+        if (today > deadline) {
+          return true
+        }
+      }
+    }
+    
+    return false
   })
-}
 
-// New function to calculate distance for a specific mileage entry
-const calculateDistanceForEntry = (expenseId, entryIndex) => {
-  if (!distanceMatrixService) return
-  
-  // Get the expense and entry
-  const expense = expenses.value.find(e => e.id === expenseId)
-  if (!expense || !expense.mileageEntries || !expense.mileageEntries[entryIndex]) return
-  
-  const entry = expense.mileageEntries[entryIndex]
-  
-  // Only calculate if both addresses have values
-  if (entry.startLocation && entry.destination) {
-    const request = {
-      origins: [entry.startLocation],
-      destinations: [entry.destination],
-      travelMode: 'DRIVING',
-      unitSystem: window.google.maps.UnitSystem.METRIC
-    }
+  // Computed property to get details about late claims for the warning message
+  const lateClaimsDetails = computed(() => {
+    const today = new Date()
+    const lateExpenses: { expenseNumber: number; date: Date; deadline: Date }[] = []
     
-    distanceMatrixService.getDistanceMatrix(request, (response, status) => {
-      if (status === 'OK') {
-        const results = response.rows[0].elements[0]
-        if (results.status === 'OK') {
-          // Get distance in kilometers
-          const distanceInMeters = results.distance.value
-          const distanceInKm = distanceInMeters / 1000
-          
-          // Update the distance field for this specific entry
-          const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-          if (expenseIndex !== -1 && expenses.value[expenseIndex].mileageEntries) {
-            expenses.value[expenseIndex].mileageEntries[entryIndex].distance = distanceInKm.toFixed(2)
-            updateMileageTotals(expenseId)
+    expenses.value.forEach((expense, index) => {
+      const category = dbCategories.value.find(c => c.id === expense.categoryId)
+      const categoryName = category?.name.toLowerCase() || ''
+      
+      if (categoryName.includes('mileage') && expense.mileageEntries) {
+        // Check each mileage entry
+        expense.mileageEntries.forEach(entry => {
+          if (entry.date && entry.distance && parseFloat(entry.distance) > 0) {
+            const deadline = calculateClaimDeadline(entry.date)
+            if (today > deadline) {
+              lateExpenses.push({
+                expenseNumber: index + 1,
+                date: entry.date.toDate(getLocalTimeZone()),
+                deadline
+              })
+            }
           }
+        })
+      } else if (expense.date) {
+        // Check regular expense
+        const deadline = calculateClaimDeadline(expense.date)
+        if (today > deadline) {
+          lateExpenses.push({
+            expenseNumber: index + 1,
+            date: expense.date.toDate(getLocalTimeZone()),
+            deadline
+          })
         }
       }
     })
-  }
-}
-
-// Load Google Maps API script
-onMounted(() => {
-  if (!window.google) {
-    const script = document.createElement('script')
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
-    script.async = true
-    script.defer = true
-    script.onload = initGoogleMaps
-    document.head.appendChild(script)
-  } else {
-    initGoogleMaps()
-  }
-})
-
-// Add the missing requiresReceipt computed property
-const requiresReceipt = computed(() => (expenseId: number) => {
-  const expense = expenses.value.find(e => e.id === expenseId)
-  if (!expense || !expense.categoryId) return true
-  
-  // Get category name
-  const category = dbCategories.value.find(c => c.id === expense.categoryId)
-  if (!category) return true
-  
-  // Mileage categories don't require receipts
-  return !category.name.toLowerCase().includes('mileage')
-})
-
-// Calculate total amount (excluding tax)
-const totalAmount = computed(() => {
-  return expenses.value.reduce((sum, expense) => {
-    const amount = parseFloat(expense.amount) || 0
-    return sum + amount
-  }, 0).toFixed(2)
-})
-
-// Calculate total GST
-const totalGST = computed(() => {
-  return expenses.value.reduce((sum, expense) => {
-    const gst = parseFloat(expense.gst_amount) || 0
-    return sum + gst
-  }, 0).toFixed(2)
-})
-
-// Calculate total PST
-const totalPST = computed(() => {
-  return expenses.value.reduce((sum, expense) => {
-    const pst = parseFloat(expense.pst_amount) || 0
-    return sum + pst
-  }, 0).toFixed(2)
-})
-
-// Add function to calculate GST for parking expenses
-const calculateParkingGST = (amount: string): string => {
-  if (!amount || isNaN(parseFloat(amount))) return '0.00'
-  return ((parseFloat(amount) / 1.29) * 0.05).toFixed(2)
-}
-
-// Update the handleCategoryChange function to calculate GST for parking
-const handleCategoryChange = (expenseId: number) => {
-  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-  if (expenseIndex === -1) return
-  
-  const expense = expenses.value[expenseIndex]
-  const category = dbCategories.value.find(c => c.id === expense.categoryId)
-  
-  if (category) {
-    const categoryName = category.name.toLowerCase()
     
-    // If it's a parking category, calculate GST based on the provided formula
-    if (categoryName.includes('parking') && expense.amount) {
-      expenses.value[expenseIndex].gst_amount = calculateParkingGST(expense.amount)
-    }
-  }
-}
-
-// Update the grand total calculation to only use the total amounts
-const grandTotal = computed(() => {
-  return expenses.value.reduce((sum, expense) => {
-    const amount = parseFloat(expense.amount) || 0
-    return sum + amount
-  }, 0).toFixed(2)
-})
-
-const df = new DateFormatter('en-US', {
-  dateStyle: 'long',
-})
-
-// Add a function to add mileage entry
-const addMileageEntry = (expenseId: number) => {
-  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-  if (expenseIndex === -1) return
-  
-  // Initialize array if it doesn't exist
-  if (!expenses.value[expenseIndex].mileageEntries) {
-    expenses.value[expenseIndex].mileageEntries = []
-  }
-  
-  // Add new entry with today's date and copy the subcategory from previous entry if available
-  const previousSubcategoryId = expenses.value[expenseIndex].mileageEntries.length > 0 
-    ? expenses.value[expenseIndex].mileageEntries[expenses.value[expenseIndex].mileageEntries.length - 1].subcategoryMappingId 
-    : '';
-  
-  // Create a new DateValue using today() from @internationalized/date
-  const todayDate = today(getLocalTimeZone())
-  
-  expenses.value[expenseIndex].mileageEntries.push({
-    jobNumber: '',
-    startLocation: '',
-    destination: '',
-    distance: '',
-    date: todayDate, // Use the DateValue directly
-    datePopoverOpen: false,
-    subcategoryMappingId: previousSubcategoryId
+    return lateExpenses
   })
-  
-  // Setup autocomplete for new fields
-  nextTick(() => {
-    setupAutocomplete()
-  })
-}
-
-// Add a function to remove mileage entry
-const removeMileageEntry = (expenseId: number, entryIndex: number) => {
-  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-  if (expenseIndex === -1) return
-  
-  // Only remove if there's more than one
-  if (expenses.value[expenseIndex].mileageEntries.length > 1) {
-    expenses.value[expenseIndex].mileageEntries.splice(entryIndex, 1)
-    updateMileageTotals(expenseId)
-  }
-}
-
-// Add function to calculate total distance
-const calculateTotalDistance = (expenseId: number) => {
-  const expense = expenses.value.find(e => e.id === expenseId)
-  if (!expense || !expense.mileageEntries) return '0'
-  
-  const total = expense.mileageEntries.reduce((sum, entry) => {
-    return sum + (parseFloat(entry.distance) || 0)
-  }, 0)
-  
-  return total.toFixed(2)
-}
-
-// Update the mileage totals and calculate amount with Vancouver bonus
-const updateMileageTotals = (expenseId: number) => {
-  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-  if (expenseIndex === -1) return
-  
-  const expense = expenses.value[expenseIndex]
-  if (!expense.mileageEntries) return
-  
-  // Calculate total amount for all entries, including Vancouver bonus
-  const totalAmount = expense.mileageEntries.reduce((sum, entry) => {
-    if (!entry.distance || parseFloat(entry.distance) <= 0) return sum
-    const entryAmount = parseFloat(calculateMileageAmountForEntry(entry.distance, entry.startLocation, entry.destination))
-    return sum + entryAmount
-  }, 0)
-  
-  const totalDistance = calculateTotalDistance(expenseId)
-  expenses.value[expenseIndex].distance = totalDistance
-  expenses.value[expenseIndex].amount = totalAmount.toFixed(2)
-}
-
-// Add string date handling for simpler input
-const updateEntryDateFromString = (expenseId: number, entryIndex: number) => {
-  const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-  if (expenseIndex === -1 || !expenses.value[expenseIndex].mileageEntries) return
-  
-  const entry = expenses.value[expenseIndex].mileageEntries[entryIndex]
-  if (entry.dateString) {
-    entry.date = new Date(entry.dateString)
-  }
-}
-
-// Helper function to check if job number should be shown for a subcategory
-const shouldShowJobNumber = (subcategoryMappingId: string) => {
-  if (!subcategoryMappingId) return false
-  
-  const subcategory = dbSubcategories.value.find(sc => sc.mapping_id === subcategoryMappingId)
-  if (!subcategory) return false
-  
-  // Check if subcategory name contains jobsite or tender
-  const subcategoryName = subcategory.name.toLowerCase()
-  return subcategoryName.includes('jobsite') || 
-         subcategoryName.includes('tender') || 
-         subcategory.requires_job_number === true
-}
-
-// Add a computed property to count total claims
-const totalClaimsCount = computed(() => {
-  return expenses.value.reduce((total, expense) => {
-    // If it's a mileage expense with multiple entries, count those entries
-    const category = dbCategories.value.find(c => c.id === expense.categoryId);
-    if (category && category.name.toLowerCase().includes('mileage') && expense.mileageEntries) {
-      // Only count entries that have distance (valid entries)
-      return total + expense.mileageEntries.filter(entry => entry.distance && parseFloat(entry.distance) > 0).length;
-    }
-    // For non-mileage expenses, count as 1
-    return total + 1;
-  }, 0);
-});
-
-// Add these methods after the existing file handling methods
-const handleDragEnter = (event: DragEvent, expenseId: number) => {
-  event.preventDefault()
-  event.stopPropagation()
-  
-  if (!dragCounter.value[expenseId]) {
-    dragCounter.value[expenseId] = 0
-  }
-  dragCounter.value[expenseId]++
-  isDragging.value[expenseId] = true
-}
-
-const handleDragLeave = (event: DragEvent, expenseId: number) => {
-  event.preventDefault()
-  event.stopPropagation()
-  
-  dragCounter.value[expenseId]--
-  if (dragCounter.value[expenseId] === 0) {
-    isDragging.value[expenseId] = false
-  }
-}
-
-const handleDragOver = (event: DragEvent) => {
-  event.preventDefault()
-  event.stopPropagation()
-}
-
-const handleDrop = async (event: DragEvent, expenseId: number) => {
-  event.preventDefault()
-  event.stopPropagation()
-  
-  isDragging.value[expenseId] = false
-  dragCounter.value[expenseId] = 0
-  
-  const files = event.dataTransfer?.files
-  if (files && files.length > 0) {
-    const file = files[0]
-    const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
-    if (expenseIndex !== -1) {
-      try {
-        // Convert HEIC to JPEG if needed
-        const convertedFile = await convertHeicToJpeg(file)
-        expenses.value[expenseIndex].receipt = convertedFile
-        await uploadFile(convertedFile, expenseId)
-      } catch (error) {
-        error.value = error.message
-      }
-    }
-  }
-}
 
 </script>
 
@@ -1154,6 +1242,31 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
       <div v-if="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
         {{ error }}
       </div>
+      
+      <!-- Late Claims Warning -->
+      <div v-if="hasLateClaims" class="bg-yellow-50 border border-yellow-400 text-yellow-800 px-4 py-3 rounded mb-4">
+        <div class="flex items-start">
+          <div class="flex-shrink-0">
+            <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div class="ml-3 flex-1">
+            <h3 class="text-sm font-medium">Late Claim Warning</h3>
+            <div class="mt-2 text-sm">
+              <p>
+                <span class="font-semibold">{{ lateClaimsDetails.length }}</span> 
+                claim{{ lateClaimsDetails.length > 1 ? 's' : '' }} 
+                {{ lateClaimsDetails.length > 1 ? 'are' : 'is' }} past the submission deadline.
+              </p>
+              <p class="mt-1 text-xs">
+                Claims must be submitted within 7 days of the following month. Late claims may require manager approval.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <Toaster />
       
       <div v-if="categoriesLoading" class="space-y-6">
@@ -1332,7 +1445,8 @@ const handleDrop = async (event: DragEvent, expenseId: number) => {
                   </PopoverTrigger>
                   <PopoverContent class="w-auto p-0">
                     <Calendar 
-                      v-model="expense.date" 
+                      v-model="expense.date"
+                      :max-value="today(getLocalTimeZone())" 
                       initial-focus 
                       @update:model-value="() => expense.datePopoverOpen = false"
                     />
