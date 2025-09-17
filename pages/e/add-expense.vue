@@ -47,6 +47,9 @@
   const uploadProgress = ref<Record<number, number>>({})
   const receiptUrls = ref<Record<number, string>>({})
   const receiptPaths = ref<Record<number, string>>({})
+  const secondReceiptUrls = ref<Record<number, string>>({})
+  const secondReceiptPaths = ref<Record<number, string>>({})
+  const showSecondReceipt = ref(false)
 
   // Get the runtime config
   const config = useRuntimeConfig()
@@ -114,6 +117,7 @@
     startLocation?: string
     destination?: string
     receipt: File | null
+    receiptTwo: File | null
     licenseNumber?: string
     relatedEmployee?: string
     clientName?: string
@@ -142,6 +146,7 @@
       startLocation: '',
       destination: '',
       receipt: null,
+      receiptTwo: null,
       licenseNumber: '',
       relatedEmployee: '',
       clientName: '',
@@ -365,6 +370,7 @@
       startLocation: '',
       destination: '',
       receipt: null,
+      receiptTwo: null,
       licenseNumber: '',
       relatedEmployee: '',
       clientName: '',
@@ -404,11 +410,28 @@
         }
       }
       
+      // If there's a second receipt path, delete it from Supabase storage
+      if (secondReceiptPaths.value[id]) {
+        try {
+          const { error: deleteError } = await client.storage
+            .from('receipts')
+            .remove([secondReceiptPaths.value[id]])
+          
+          if (deleteError) {
+            console.error('Error deleting second file from storage:', deleteError)
+          }
+        } catch (err) {
+          console.error('Error during second file deletion:', err)
+        }
+      }
+      
       expenses.value = expenses.value.filter(expense => expense.id !== id)
       delete uploadStatus.value[id]
       delete uploadProgress.value[id]
       delete receiptUrls.value[id]
       delete receiptPaths.value[id]
+      delete secondReceiptUrls.value[id]
+      delete secondReceiptPaths.value[id]
     }
   }
 
@@ -552,6 +575,8 @@
       // Clear local state
       delete receiptPaths.value[expenseId]
       delete receiptUrls.value[expenseId]
+      delete secondReceiptUrls.value[expenseId]
+      delete secondReceiptPaths.value[expenseId]
       uploadStatus.value[expenseId] = 'idle'
       uploadProgress.value[expenseId] = 0
       
@@ -559,6 +584,7 @@
       const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
       if (expenseIndex !== -1) {
         expenses.value[expenseIndex].receipt = null
+        expenses.value[expenseIndex].receiptTwo = null
       }
       
     } catch (err) {
@@ -626,6 +652,7 @@
               start_location: entry.startLocation, // Keep full address in the actual data field
               destination: entry.destination, // Keep full address in the actual data field
               receipt_url: null, // Mileage doesn't need receipts
+              receipt_url_2: null,
               status: 'pending',
               category_id: expense.categoryId,
               subcategory_mapping_id: entry.subcategoryMappingId,
@@ -659,6 +686,7 @@
             start_location: expense.startLocation,
             destination: expense.destination,
             receipt_url: receiptPaths.value[expense.id] || null,
+            receipt_url_2: secondReceiptPaths.value[expense.id] || null,
             status: 'pending',
             category_id: expense.categoryId,
             subcategory_mapping_id: expense.subcategoryMappingId,
@@ -1226,6 +1254,96 @@
     return lateExpenses
   })
 
+  // Handle second receipt file upload
+  const handleSecondFileUpload = async (event: Event, expenseId: number) => {
+    const input = event.target as HTMLInputElement
+    if (input.files && input.files.length > 0) {
+      const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+      if (expenseIndex !== -1) {
+        try {
+          const convertedFile = await convertHeicToJpeg(input.files[0])
+          expenses.value[expenseIndex].receiptTwo = convertedFile
+          await uploadSecondFile(convertedFile, expenseId)
+        } catch (e: any) {
+          error.value = e?.message || 'Failed to upload second file'
+        }
+      }
+    }
+  }
+
+  const uploadSecondFile = async (file: File, expenseId: number): Promise<void> => {
+    if (!file) return
+    try {
+      if (!user.value) throw new Error('You must be logged in to upload files')
+
+      uploadStatus.value[expenseId] = 'uploading'
+      uploadProgress.value[expenseId] = 0
+
+      const filePath = `${user.value.id}/${Date.now()}-second-${file.name}`
+      const { error: uploadError } = await client.storage
+        .from('receipts')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+          onUploadProgress: (progress) => {
+            uploadProgress.value[expenseId] = Math.round((progress.loaded / progress.total) * 100)
+          }
+        })
+
+      if (uploadError) throw uploadError
+
+      secondReceiptPaths.value[expenseId] = filePath
+      secondReceiptUrls.value[expenseId] = filePath
+      uploadStatus.value[expenseId] = 'success'
+    } catch (e: any) {
+      console.error('Error uploading second file:', e)
+      uploadStatus.value[expenseId] = 'error'
+      error.value = e?.message || 'Failed to upload second file'
+    }
+  }
+
+  const deleteSecondFile = async (expenseId: number): Promise<void> => {
+    if (!secondReceiptPaths.value[expenseId]) return
+    try {
+      const { error: deleteError } = await client.storage
+        .from('receipts')
+        .remove([secondReceiptPaths.value[expenseId]])
+      if (deleteError) throw deleteError
+
+      delete secondReceiptPaths.value[expenseId]
+      delete secondReceiptUrls.value[expenseId]
+
+      const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+      if (expenseIndex !== -1) {
+        expenses.value[expenseIndex].receiptTwo = null
+      }
+    } catch (e: any) {
+      console.error('Error deleting second file:', e)
+      error.value = e?.message || 'Failed to delete second file'
+    }
+  }
+
+  const handleSecondDrop = async (event: DragEvent, expenseId: number) => {
+    event.preventDefault()
+    event.stopPropagation()
+    isDragging.value[expenseId] = false
+    dragCounter.value[expenseId] = 0
+
+    const files = event.dataTransfer?.files
+    if (files && files.length > 0) {
+      const file = files[0]
+      const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+      if (expenseIndex !== -1) {
+        try {
+          const convertedFile = await convertHeicToJpeg(file)
+          expenses.value[expenseIndex].receiptTwo = convertedFile
+          await uploadSecondFile(convertedFile, expenseId)
+        } catch (e: any) {
+          error.value = e?.message || 'Failed to upload second file'
+        }
+      }
+    }
+  }
 </script>
 
 <template>
@@ -1769,28 +1887,109 @@
                     </div>
                   </label>
                 </div>
-                
-                <!-- If receipt is uploaded -->
-                <div v-else class="border-2 border-green-200 rounded-md p-4">
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center">
-                      <Check class="h-5 w-5 text-green-500 mr-2" />
-                      <div>
-                        <p class="text-responsive-sm font-medium">Receipt uploaded successfully</p>
-                        <p class="text-responsive-xs text-gray-500">
-                          {{ expense.receipt?.name || 'File uploaded' }}
-                        </p>
+
+                <!-- If first receipt is uploaded, show success and second receipt option -->
+                <div v-else class="space-y-4">
+                  <!-- First receipt success -->
+                  <div class="border-2 border-green-200 rounded-md p-4">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center">
+                        <Check class="h-5 w-5 text-green-500 mr-2" />
+                        <div>
+                          <p class="text-responsive-sm font-medium">First Receipt uploaded successfully</p>
+                          <p class="text-responsive-xs text-gray-500">
+                            {{ expense.receipt?.name || 'File uploaded' }}
+                          </p>
+                        </div>
                       </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        @click="deleteFile(expense.id)" 
+                        type="button"
+                        class="text-red-500"
+                      >
+                        <X class="h-4 w-4" />
+                      </Button>
                     </div>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      @click="deleteFile(expense.id)" 
-                      type="button"
-                      class="text-red-500"
+                  </div>
+
+                  <!-- Second receipt upload section -->
+                  <div v-if="!secondReceiptPaths[expense.id]">
+                    <Label for="secondReceipt" class="flex items-center mb-2">
+                      Second Receipt (Optional)
+                    </Label>
+                    
+                    <div 
+                      class="border-2 border-dashed rounded-md p-4 text-center transition-colors duration-200"
+                      :class="{
+                        'border-gray-300 bg-gray-50': !isDragging[expense.id],
+                        'border-primary bg-primary/5': isDragging[expense.id]
+                      }"
+                      @dragenter="(e) => handleDragEnter(e, expense.id)"
+                      @dragleave="(e) => handleDragLeave(e, expense.id)"
+                      @dragover="handleDragOver"
+                      @drop="(e) => handleSecondDrop(e, expense.id)"
                     >
-                      <X class="h-4 w-4" />
-                    </Button>
+                      <input 
+                        type="file" 
+                        :id="`secondReceipt-${expense.id}`" 
+                        class="hidden" 
+                        accept="image/*,.pdf,.heic,.heif" 
+                        @change="(e) => handleSecondFileUpload(e, expense.id)"
+                      />
+                      <label :for="`secondReceipt-${expense.id}`" class="cursor-pointer">
+                        <div class="flex flex-col items-center justify-center">
+                          <Upload class="h-8 w-8 mb-2" :class="isDragging[expense.id] ? 'text-primary' : 'text-gray-400'" />
+                          <p class="text-responsive-sm font-medium">
+                            {{ isDragging[expense.id] ? 'Drop second receipt here' : 'Click or drag second receipt here' }}
+                          </p>
+                          <p class="text-responsive-xs text-gray-500 mt-1">
+                            JPG, PNG or PDF (max. 10MB)
+                          </p>
+                          
+                          <!-- Progress bar for second upload -->
+                          <div v-if="uploadStatus[expense.id] === 'uploading'" class="w-full mt-2">
+                            <div class="bg-gray-200 rounded-full h-2.5 w-full">
+                              <div 
+                                class="bg-blue-600 h-2.5 rounded-full" 
+                                :style="{ width: `${uploadProgress[expense.id]}%` }"
+                              ></div>
+                            </div>
+                            <p class="text-responsive-xs text-gray-500 mt-1">{{ uploadProgress[expense.id] }}%</p>
+                          </div>
+                          
+                          <!-- Error message -->
+                          <p v-if="uploadStatus[expense.id] === 'error'" class="text-responsive-xs text-red-500 mt-1">
+                            Upload failed. Please try again.
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- If second receipt is uploaded -->
+                  <div v-else class="border-2 border-green-200 rounded-md p-4">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center">
+                        <Check class="h-5 w-5 text-green-500 mr-2" />
+                        <div>
+                          <p class="text-responsive-sm font-medium">Second Receipt uploaded successfully</p>
+                          <p class="text-responsive-xs text-gray-500">
+                            {{ expense.receiptTwo?.name || 'File uploaded' }}
+                          </p>
+                        </div>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        @click="deleteSecondFile(expense.id)" 
+                        type="button"
+                        class="text-red-500"
+                      >
+                        <X class="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>

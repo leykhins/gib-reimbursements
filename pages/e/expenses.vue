@@ -29,6 +29,7 @@ import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getReceiptSignedUrl } from '~/lib/utils'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 definePageMeta({
   layout: 'employee',
@@ -46,6 +47,13 @@ const categories = ref([])
 const viewingReceipt = ref(false)
 const currentReceiptUrl = ref('')
 const isImageReceipt = ref(false)
+const activeReceiptTab = ref('r1')
+const hasSecondReceipt = ref(false)
+const currentReceiptUrl2 = ref('')
+const isImageReceipt2 = ref(false)
+
+const receiptToView1 = ref<string | null>(null)
+const receiptToView2 = ref<string | null>(null)
 
 // Expanded sections tracking
 const expandedCategories = ref({})
@@ -252,27 +260,11 @@ const formatStatus = (status) => {
 }
 
 // Receipt handling
-const viewReceipt = async (receiptUrl) => {
-  if (!receiptUrl) return
-  
-  try {
-    const { signedUrl, isImage } = await getReceiptSignedUrl(client, receiptUrl)
-    
-    if (!signedUrl) {
-      throw new Error('Failed to get signed URL')
-    }
-    
-    currentReceiptUrl.value = signedUrl
-    isImageReceipt.value = isImage
-    viewingReceipt.value = true
-  } catch (err) {
-    console.error('Error viewing receipt:', err)
-    toast({
-      title: 'Error',
-      description: 'Could not load receipt',
-      variant: 'destructive'
-    })
-  }
+const viewReceipt = async (receiptUrl, receiptUrl2 = null) => {
+  if (!receiptUrl && !receiptUrl2) return
+  receiptToView1.value = receiptUrl || null
+  receiptToView2.value = receiptUrl2 || null
+  viewingReceipt.value = true
 }
 
 // Status badge class
@@ -514,7 +506,7 @@ onMounted(async () => {
           <SelectTrigger class="h-8 w-full">
             <div class="flex items-center">
               <CalendarIcon class="w-4 h-4 mr-2" />
-              <SelectValue :placeholder="selectedYear" />
+              <SelectValue :placeholder="String(selectedYear)" />
             </div>
           </SelectTrigger>
           <SelectContent>
@@ -751,9 +743,9 @@ onMounted(async () => {
                             <Button 
                               variant="outline" 
                               size="sm"
-                              @click="viewReceipt(claim.receipt_url)"
-                              :disabled="!claim.receipt_url"
-                              class="h-7 w-7 p-0 rounded-md"
+                              @click="viewReceipt(claim.receipt_url, claim.receipt_url_2)"
+                              :disabled="!claim.receipt_url && !claim.receipt_url_2"
+                              class="h-7 w-7 p-0 rounded-md bg-secondary text-white hover:bg-orange-700"
                             >
                               <FileText class="h-4 w-4" />
                             </Button>
@@ -770,33 +762,12 @@ onMounted(async () => {
       </div>
     </div>
     
-       <!-- Receipt Viewer Dialog -->
-       <Dialog v-model:open="viewingReceipt">
-      <DialogContent class="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>Receipt</DialogTitle>
-        </DialogHeader>
-        <div class="h-[70vh] overflow-auto">
-          <!-- Loading state -->
-          <div v-if="!currentReceiptUrl" class="flex items-center justify-center h-full">
-            <Loader2 class="h-8 w-8 animate-spin text-black" />
-          </div>
-          <!-- For image files -->
-          <img 
-            v-else-if="isImageReceipt" 
-            :src="currentReceiptUrl" 
-            class="max-w-full max-h-full object-contain mx-auto"
-            alt="Receipt"
-          />
-          <!-- For PDF files -->
-          <iframe 
-            v-else
-            :src="currentReceiptUrl" 
-            class="w-full h-full"
-          ></iframe>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <!-- Receipt Viewer Dialog -->
+    <ReceiptViewer
+      v-model:open="viewingReceipt"
+      :url1="receiptToView1"
+      :url2="receiptToView2"
+    />
 
     <!-- Footer with expense totals -->
     <div class="fixed bottom-0 right-0 lg:left-64 left-0 bg-white border-t shadow-lg p-4 z-40">

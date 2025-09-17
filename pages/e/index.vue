@@ -38,6 +38,8 @@ const receiptSignedUrls = ref({})
 // Add these variables for receipt viewing
 const viewingReceipt = ref(false)
 const currentReceiptUrl = ref('')
+const receiptToView1 = ref<string | null>(null)
+const receiptToView2 = ref<string | null>(null)
 
 // Add this ref for viewing rejection details
 const viewingRejection = ref(false)
@@ -74,32 +76,11 @@ const getReceiptUrl = async (url, requestId) => {
 }
 
 // Add viewReceipt function
-const viewReceipt = async (receiptUrl, requestId) => {
-  if (!receiptUrl) return
-  
-  isReceiptLoading.value = true
-  currentReceiptUrl.value = '' // Clear the current URL while loading
+const viewReceipt = async (receiptUrl, receiptUrl2 = null) => {
+  if (!receiptUrl && !receiptUrl2) return
+  receiptToView1.value = receiptUrl || null
+  receiptToView2.value = receiptUrl2 || null
   viewingReceipt.value = true
-  
-  try {
-    const { signedUrl, isImage } = await getReceiptSignedUrl(client, receiptUrl)
-    
-    if (!signedUrl) {
-      throw new Error('Failed to get signed URL')
-    }
-    
-    currentReceiptUrl.value = signedUrl
-    isImageReceipt.value = isImage
-  } catch (err) {
-    console.error('Error viewing receipt:', err)
-    toast({
-      title: 'Error',
-      description: 'Could not load receipt',
-      variant: 'destructive'
-    })
-  } finally {
-    isReceiptLoading.value = false
-  }
 }
 
 // Prepare signed URLs for all receipts after fetching data
@@ -148,6 +129,7 @@ const fetchReimbursementRequests = async () => {
         start_location,
         destination,
         receipt_url,
+        receipt_url_2,
         status,
         rejection_reason,
         date,
@@ -465,13 +447,12 @@ const monthlyChangeText = computed(() => {
                   <TableCell class="py-3">
                     <Button 
                       v-if="request.receipt_url" 
-                      @click="viewReceipt(request.receipt_url, request.id)" 
+                      @click="viewReceipt(request.receipt_url, request.receipt_url_2)"
+                      variant="outline" 
                       size="sm"
-                      variant="outline"
-                      class="h-7 text-xs"
+                      class="h-7 w-7 p-0 rounded-md bg-secondary text-white hover:bg-orange-700"
                     >
-                      <FileText class="h-3 w-3 mr-1" />
-                      View
+                      <FileText class="h-4 w-4" />
                     </Button>
                     <span v-else class="text-muted-foreground text-xs">No receipt</span>
                   </TableCell>
@@ -490,32 +471,11 @@ const monthlyChangeText = computed(() => {
     </Card>
 
     <!-- Receipt Dialog -->
-    <Dialog v-model:open="viewingReceipt">
-      <DialogContent class="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle class="text-sm">Receipt</DialogTitle>
-        </DialogHeader>
-        <div class="h-[70vh] overflow-auto">
-          <!-- Loading state -->
-          <div v-if="isReceiptLoading" class="flex items-center justify-center h-full">
-            <Loader2 class="h-8 w-8 animate-spin text-black" />
-          </div>
-          <!-- For image files -->
-          <img 
-            v-else-if="isImageReceipt" 
-            :src="currentReceiptUrl" 
-            class="max-w-full max-h-full object-contain mx-auto"
-            alt="Receipt"
-          />
-          <!-- For PDF files -->
-          <iframe 
-            v-else
-            :src="currentReceiptUrl" 
-            class="w-full h-full"
-          ></iframe>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <ReceiptViewer
+      v-model:open="viewingReceipt"
+      :url1="receiptToView1"
+      :url2="receiptToView2"
+    />
 
     <!-- Rejection Details Dialog -->
     <Dialog v-model:open="viewingRejection">

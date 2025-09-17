@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { MessageSquare } from 'lucide-vue-next'
+import { Check, MessageSquare, X } from 'lucide-vue-next'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 
@@ -47,6 +47,9 @@ const error = ref(null)
 const categories = ref([])
 const viewingReceipt = ref(false)
 const currentReceiptUrl = ref('')
+
+const receiptToView1 = ref<string | null>(null)
+const receiptToView2 = ref<string | null>(null)
 
 // Expanded sections tracking
 const expandedEmployees = ref({})
@@ -403,27 +406,11 @@ const formatStatus = (status) => {
 }
 
 // Receipt handling
-const viewReceipt = async (receiptUrl) => {
-  if (!receiptUrl) return
-  
-  try {
-    const { signedUrl, isImage } = await getReceiptSignedUrl(client, receiptUrl)
-    
-    if (!signedUrl) {
-      throw new Error('Failed to get signed URL')
-    }
-    
-    currentReceiptUrl.value = signedUrl
-    isImageReceipt.value = isImage
-    viewingReceipt.value = true
-  } catch (err) {
-    console.error('Error viewing receipt:', err)
-    toast({
-      title: 'Error',
-      description: 'Could not load receipt',
-      variant: 'destructive'
-    })
-  }
+const viewReceipt = async (receiptUrl, receiptUrl2 = null) => {
+  if (!receiptUrl && !receiptUrl2) return
+  receiptToView1.value = receiptUrl || null
+  receiptToView2.value = receiptUrl2 || null
+  viewingReceipt.value = true
 }
 
 // Status badge class
@@ -1131,10 +1118,9 @@ const getTotalNotes = (request) => {
                                     <Button 
                                       variant="outline" 
                                       size="sm"
-                                      @click="viewReceipt(request.receipt_url)"
-                                      :disabled="!request.receipt_url"
-                                      class="h-7 w-7 p-0 rounded-md"
-                                      title="View Receipt"
+                                      @click="viewReceipt(request.receipt_url, request.receipt_url_2)"
+                                      :disabled="!request.receipt_url && !request.receipt_url_2"
+                                      class="h-7 w-7 p-0 rounded-md bg-secondary text-white hover:bg-orange-700"
                                     >
                                       <FileText class="h-4 w-4" /> 
                                     </Button>
@@ -1142,7 +1128,7 @@ const getTotalNotes = (request) => {
                                     <Button 
                                       variant="outline" 
                                       size="sm"
-                                      class="h-7 w-7 p-0 rounded-md"
+                                      class="h-7 w-7 p-0 rounded-md bg-secondary text-white hover:bg-orange-700"
                                       @click="openAddNoteDialog(request)"
                                       title="Add Note"
                                     >
@@ -1153,22 +1139,22 @@ const getTotalNotes = (request) => {
                                       v-if="request.status === 'pending'"
                                       variant="outline" 
                                       size="sm"
-                                      class="h-7 w-7 p-0 bg-green-100 hover:bg-green-200 text-green-800 rounded-md"
+                                      class="h-7 w-7 p-0 rounded-md bg-green-500 hover:bg-green-600 text-white"
                                       @click="verifySelectedRequests(request.id)"
                                       title="Approve Request"
                                     >
-                                      <CheckCircle2 class="h-4 w-4" />
+                                      <Check class="h-4 w-4" />
                                     </Button>
                                     
                                     <Button 
                                       v-if="request.status === 'pending'"
                                       variant="outline" 
                                       size="sm"
-                                      class="h-7 w-7 p-0 bg-red-100 hover:bg-red-200 text-red-800 rounded-md"
+                                      class="h-7 w-7 p-0 rounded-md bg-red-500 hover:bg-red-600 text-white"
                                       @click="rejectRequest(request.id)"
                                       title="Reject Request"
                                     >
-                                      <XCircle class="h-4 w-4" />
+                                      <X class="h-4 w-4" />
                                     </Button>
                                   </div>
                                 </TableCell>
@@ -1188,32 +1174,11 @@ const getTotalNotes = (request) => {
     </div>
     
     <!-- Receipt Viewer Dialog -->
-    <Dialog v-model:open="viewingReceipt">
-      <DialogContent class="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>Receipt</DialogTitle>
-        </DialogHeader>
-        <div class="h-[70vh] overflow-auto">
-          <!-- Loading state -->
-          <div v-if="!currentReceiptUrl" class="flex items-center justify-center h-full">
-            <Loader2 class="h-8 w-8 animate-spin text-black" />
-          </div>
-          <!-- For image files -->
-          <img 
-            v-else-if="isImageReceipt" 
-            :src="currentReceiptUrl" 
-            class="max-w-full max-h-full object-contain mx-auto"
-            alt="Receipt"
-          />
-          <!-- For PDF files -->
-          <iframe 
-            v-else
-            :src="currentReceiptUrl" 
-            class="w-full h-full"
-          ></iframe>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <ReceiptViewer
+      v-model:open="viewingReceipt"
+      :url1="receiptToView1"
+      :url2="receiptToView2"
+    />
 
     <!-- Verification Confirmation Modal -->
     <Dialog v-model:open="showVerifyModal">
