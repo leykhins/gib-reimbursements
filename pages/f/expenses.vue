@@ -22,7 +22,10 @@ import {
   CheckCircle,
   Download,
   Loader2,
-  MessageSquare
+  MessageSquare,
+  ClockArrowDown,
+  CheckCircle2,
+  XCircle
 } from 'lucide-vue-next'
 import { format } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -683,10 +686,86 @@ const confirmRejection = async () => {
   }
 }
 
-// Update the PDF generation function
-const generateEmployeePDF = async (employeeId) => {
+// Add this helper function to convert receipts to base64 for pdfMake
+const getReceiptAsBase64 = async (receiptUrl: string): Promise<string | null> => {
+  try {
+    // Get signed URL for the receipt
+    const { data, error } = await client.storage
+      .from('receipts')
+      .createSignedUrl(receiptUrl, 60 * 60) // 1 hour expiry
+    
+    if (error) throw error
+    
+    // Fetch the file
+    const response = await fetch(data.signedUrl)
+    if (!response.ok) throw new Error('Failed to fetch receipt')
+    
+    // Convert to base64 using a more efficient method for large files
+    const arrayBuffer = await response.arrayBuffer()
+    const uint8Array = new Uint8Array(arrayBuffer)
+    
+    // Convert to base64 in chunks to avoid call stack overflow
+    let binary = ''
+    const chunkSize = 8192 // Process in 8KB chunks
+    
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.subarray(i, i + chunkSize)
+      binary += String.fromCharCode.apply(null, Array.from(chunk))
+    }
+    
+    const base64 = btoa(binary)
+    
+    // Determine MIME type based on file extension
+    const extension = receiptUrl.split('.').pop()?.toLowerCase()
+    let mimeType = 'image/jpeg' // default
+    
+    if (extension === 'pdf') {
+      mimeType = 'application/pdf'
+    } else if (extension === 'png') {
+      mimeType = 'image/png'
+    } else if (extension === 'gif') {
+      mimeType = 'image/gif'
+    } else if (extension === 'webp') {
+      mimeType = 'image/webp'
+    } else if (extension === 'bmp') {
+      mimeType = 'image/bmp'
+    } else if (extension === 'svg') {
+      mimeType = 'image/svg+xml'
+    }
+    
+    return `data:${mimeType};base64,${base64}`
+  } catch (err) {
+    console.error('Error converting receipt to base64:', err)
+    return null
+  }
+}
+
+// Add helper function to check if employee has downloaded claims
+const hasDownloadedClaims = (employeeId) => {
+  const employee = organizedData.value[employeeId]
+  if (!employee) return false
+  
+  return Object.values(employee.categories).some(category => 
+    Object.values(category.jobGroups).some(jobGroup => 
+      jobGroup.requests.some(request => 
+        request.status === 'completed' && request.pdf_downloaded_at
+      )
+    )
+  )
+}
+
+// Add loading states for PDF generation
+const isGeneratingPDF = ref(false)
+const generatingEmployeeId = ref(null)
+
+// Update the generateEmployeePDF function to include loading state
+const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
   const employee = organizedData.value[employeeId]
   if (!employee) return
+
+  // Set loading state
+  isGeneratingPDF.value = true
+  generatingEmployeeId.value = employeeId
 
   try {
     const { $pdfMake } = useNuxtApp()
@@ -701,24 +780,36 @@ const generateEmployeePDF = async (employeeId) => {
       return
     }
     
-    // Check if any undownloaded completed claims exist
-    let hasUndownloadedClaims = false
+    // Check claims based on includeDownloaded parameter
+    let hasClaims = false
     const claimIds = []
+    const newClaimIds = []
+    
     Object.values(employee.categories).forEach(category => {
       Object.values(category.jobGroups).forEach(jobGroup => {
         jobGroup.requests.forEach(request => {
-          if (request.status === 'completed' && !request.pdf_downloaded_at) {
-            hasUndownloadedClaims = true
-            claimIds.push(request.id)
+          if (request.status === 'completed') {
+            if (includeDownloaded || !request.pdf_downloaded_at) {
+              hasClaims = true
+              claimIds.push(request.id)
+              
+              if (!request.pdf_downloaded_at) {
+                newClaimIds.push(request.id)
+              }
+            }
           }
         })
       })
     })
 
-    if (!hasUndownloadedClaims) {
+    if (!hasClaims) {
+      const message = includeDownloaded 
+        ? 'This employee has no completed claims for the selected period'
+        : 'This employee has no undownloaded completed claims for the selected period'
+      
       toast({
-        title: 'No New Claims',
-        description: 'This employee has no undownloaded completed claims for the selected period',
+        title: 'No Claims',
+        description: message,
         variant: 'destructive'
       })
       return
@@ -728,7 +819,7 @@ const generateEmployeePDF = async (employeeId) => {
     const monthName = months[selectedMonth.value]
     const yearStr = String(selectedYear.value)
 
-    // Create document content array - we'll add elements to this
+    // Create document content array
     const docContent = [
       {
         text: 'Expense Reimbursement Summary',
@@ -771,7 +862,6 @@ const generateEmployeePDF = async (employeeId) => {
         margin: [0, 5, 0, 15]
       })
     } else {
-      // Add extra margin if no date range
       docContent[docContent.length - 1].margin = [0, 5, 0, 15]
     }
 
@@ -783,7 +873,8 @@ const generateEmployeePDF = async (employeeId) => {
     // Get categories in sorted order
     const sortedCategoryIds = getSortedCategoryKeys(employeeId)
     
-    sortedCategoryIds.forEach(categoryId => {
+    // Process each category
+    for (const categoryId of sortedCategoryIds) {
       const category = employee.categories[categoryId]
       let categoryHasCompletedClaims = false
       let categoryTotal = 0
@@ -802,10 +893,10 @@ const generateEmployeePDF = async (employeeId) => {
         ]
       ]
       
-      // Add entries for this category
-      Object.entries(category.jobGroups).forEach(([jobNumber, jobGroup]) => {
-        jobGroup.requests.forEach(request => {
-          if (request.status === 'completed' && !request.pdf_downloaded_at) {
+      // Process each job group in this category
+      for (const [jobNumber, jobGroup] of Object.entries(category.jobGroups)) {
+        for (const request of jobGroup.requests) {
+          if (request.status === 'completed' && (includeDownloaded || !request.pdf_downloaded_at)) {
             categoryHasCompletedClaims = true
             const amount = parseFloat(request.amount) || 0
             const gst = parseFloat(request.gst_amount) || 0
@@ -819,16 +910,108 @@ const generateEmployeePDF = async (employeeId) => {
             overallGst += gst
             overallPst += pst
             
+            // Fix the description content structure for proper image embedding
+            // Build description content with embedded receipts
+            const descriptionContent = []
+
+            // Add text content
+            descriptionContent.push({ text: request.description, fontSize: 9 })
+
+            if (request.related_employee) {
+              descriptionContent.push({ text: `\nEmployee: ${request.related_employee}`, fontSize: 8, color: '#666' })
+            }
+
+            if (request.client_name) {
+              descriptionContent.push({ text: `\nClient: ${request.client_name}${request.company_name ? ` (${request.company_name})` : ''}`, fontSize: 8, color: '#666' })
+            }
+
+            if (request.is_travel) {
+              descriptionContent.push({ text: `\nFrom: ${request.start_location} To: ${request.destination}`, fontSize: 8, color: '#666' })
+            }
+
+            // Process and add receipts to description
+            if (request.receipt_url) {
+              try {
+                const isPdf = request.receipt_url.toLowerCase().endsWith('.pdf')
+                
+                if (isPdf) {
+                  // For PDF receipts, show a link
+                  const { data: signedUrlData } = await client.storage
+                    .from('receipts')
+                    .createSignedUrl(request.receipt_url, 60 * 60)
+                  
+                  if (signedUrlData) {
+                    descriptionContent.push({ text: '\nReceipt 1 (PDF):', fontSize: 8, color: '#666' })
+                    descriptionContent.push({ 
+                      text: 'View PDF Receipt', 
+                      fontSize: 8, 
+                      color: '#0066cc',
+                      link: signedUrlData.signedUrl,
+                      decoration: 'underline'
+                    })
+                  }
+                } else {
+                  // Handle regular image files
+                  const receiptBase64 = await getReceiptAsBase64(request.receipt_url)
+                  if (receiptBase64) {
+                    descriptionContent.push({ text: '\nReceipt 1:', fontSize: 8, color: '#666' })
+                    descriptionContent.push({ 
+                      image: receiptBase64, 
+                      width: 200, 
+                      margin: [0, 2, 0, 2]
+                    })
+                  }
+                }
+              } catch (err) {
+                console.error('Error processing receipt 1:', err)
+                descriptionContent.push({ text: '\nReceipt 1: Error loading', fontSize: 8, color: '#888', fontStyle: 'italic' })
+              }
+            }
+
+            if (request.receipt_url_2) {
+              try {
+                const isPdf = request.receipt_url_2.toLowerCase().endsWith('.pdf')
+                
+                if (isPdf) {
+                  // For PDF receipts, show a link
+                  const { data: signedUrlData } = await client.storage
+                    .from('receipts')
+                    .createSignedUrl(request.receipt_url_2, 60 * 60)
+                  
+                  if (signedUrlData) {
+                    descriptionContent.push({ text: '\nReceipt 2 (PDF):', fontSize: 8, color: '#666' })
+                    descriptionContent.push({ 
+                      text: 'View PDF Receipt', 
+                      fontSize: 8, 
+                      color: '#0066cc',
+                      link: signedUrlData.signedUrl,
+                      decoration: 'underline'
+                    })
+                  }
+                } else {
+                  // Handle regular image files
+                  const receiptBase64 = await getReceiptAsBase64(request.receipt_url_2)
+                  if (receiptBase64) {
+                    descriptionContent.push({ text: '\nReceipt 2:', fontSize: 8, color: '#666' })
+                    descriptionContent.push({ 
+                      image: receiptBase64, 
+                      width: 200, 
+                      margin: [0, 2, 0, 2]
+                    })
+                  }
+                }
+              } catch (err) {
+                console.error('Error processing receipt 2:', err)
+                descriptionContent.push({ text: '\nReceipt 2: Error loading', fontSize: 8, color: '#888', fontStyle: 'italic' })
+              }
+            }
+            
+            // Then in the table body push:
             tableBody.push([
               { text: formatDate(request.date), fontSize: 10 },
               { text: request.job_number, fontSize: 10 },
               {
-                text: [
-                  request.description,
-                  request.related_employee ? `\nEmployee: ${request.related_employee}` : '',
-                  request.client_name ? `\nClient: ${request.client_name}${request.company_name ? ` (${request.company_name})` : ''}` : '',
-                  request.is_travel ? `\nFrom: ${request.start_location} To: ${request.destination}` : ''
-                ],
+                stack: descriptionContent, // Use 'stack' instead of 'text' for mixed content
                 fontSize: 9
               },
               { text: formatCurrency(gst), alignment: 'right', fontSize: 10 },
@@ -836,8 +1019,8 @@ const generateEmployeePDF = async (employeeId) => {
               { text: formatCurrency(amount), alignment: 'right', fontSize: 10 },
             ])
           }
-        })
-      })
+        }
+      }
       
       // Only add this category if it has completed claims
       if (categoryHasCompletedClaims) {
@@ -893,7 +1076,7 @@ const generateEmployeePDF = async (employeeId) => {
           ]
         })
       }
-    })
+    }
     
     // Add grand total
     docContent.push({
@@ -1000,22 +1183,27 @@ const generateEmployeePDF = async (employeeId) => {
     const fileName = `${employee.name.replace(/\s+/g, '_')}_Expenses_${monthName}_${yearStr}.pdf`
     $pdfMake.createPdf(docDefinition).download(fileName)
 
-    // Mark claims as downloaded
-    if (claimIds.length > 0) {
+    // Only mark new claims as downloaded
+    if (newClaimIds.length > 0) {
       await client
         .from('claims')
         .update({ pdf_downloaded_at: new Date().toISOString() })
-        .in('id', claimIds)
+        .in('id', newClaimIds)
       
       // Refresh data to show updated status
       await fetchReimbursementRequests()
-      
-      toast({
-        title: 'Success',
-        description: `PDF generated and ${claimIds.length} claims marked as downloaded`,
-        variant: 'default'
-      })
     }
+
+    // Show appropriate success message
+    const message = includeDownloaded 
+      ? `PDF regenerated with ${claimIds.length} claims${newClaimIds.length > 0 ? ` (${newClaimIds.length} newly marked as downloaded)` : ''}`
+      : `PDF generated and ${newClaimIds.length} claims marked as downloaded`
+    
+    toast({
+      title: 'Success',
+      description: message,
+      variant: 'default'
+    })
 
   } catch (err) {
     console.error('PDF generation error', err)
@@ -1024,6 +1212,10 @@ const generateEmployeePDF = async (employeeId) => {
       description: 'Failed to generate PDF',
       variant: 'destructive'
     })
+  } finally {
+    // Clear loading state
+    isGeneratingPDF.value = false
+    generatingEmployeeId.value = null
   }
 }
 
@@ -1141,6 +1333,60 @@ const saveNote = async () => {
 // Add this helper function
 const getTotalNotes = (request) => {
   return request.notes?.length || 0
+}
+
+// Fix the convertPdfToImage function with correct worker URL
+const convertPdfToImage = async (receiptUrl: string): Promise<string | null> => {
+  try {
+    // Get signed URL for the PDF
+    const { data, error } = await client.storage
+      .from('receipts')
+      .createSignedUrl(receiptUrl, 60 * 60)
+    
+    if (error) throw error
+    
+    // Import pdfjs-dist dynamically
+    const pdfjsLib = await import('pdfjs-dist')
+    
+    // Configure the worker with correct URL
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+    
+    // Load the PDF
+    const pdf = await pdfjsLib.getDocument(data.signedUrl).promise
+    
+    // Get the first page
+    const page = await pdf.getPage(1)
+    
+    // Set up canvas
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+    
+    if (!context) {
+      throw new Error('Could not get canvas context')
+    }
+    
+    // Set canvas size (scale for better quality)
+    const scale = 2.0
+    const viewport = page.getViewport({ scale })
+    canvas.width = viewport.width
+    canvas.height = viewport.height
+    
+    // Render page to canvas
+    const renderContext = {
+      canvasContext: context,
+      viewport: viewport
+    }
+    
+    await page.render(renderContext).promise
+    
+    // Convert to base64 JPEG
+    const imageBase64 = canvas.toDataURL('image/jpeg', 0.8) // 0.8 quality
+    
+    return imageBase64
+  } catch (err) {
+    console.error('Error converting PDF to image:', err)
+    return null
+  }
 }
 
 </script>
@@ -1379,22 +1625,36 @@ const getTotalNotes = (request) => {
                 </div>
               </div>
               <!-- Modified PDF export button to only show for employees with all completed claims -->
-              <Button 
-                v-if="hasAnyCompletedClaims(employeeId)"
-                variant="outline" 
-                size="sm"
-                @click.stop="generateEmployeePDF(employeeId)"
-                :class="[
-                  'ml-2 border-white/40',
-                  hasAllClaimsCompleted(employeeId) 
-                    ? 'bg-white/20 hover:bg-white/30' 
-                    : 'bg-green-500/80 hover:bg-green-600/80'
-                ]"
-                :title="hasAllClaimsCompleted(employeeId) ? 'Export New Claims to PDF' : 'All Claims Downloaded'"
-              >
-                <Download class="h-4 w-4 mr-1" />
-                {{ hasAllClaimsCompleted(employeeId) ? 'PDF' : 'Downloaded' }}
-              </Button>
+              <div class="flex items-center gap-2">
+                <!-- New Claims PDF Button -->
+                <Button 
+                  v-if="hasAllClaimsCompleted(employeeId)"
+                  variant="outline" 
+                  size="sm"
+                  @click.stop="generateEmployeePDF(employeeId, false)"
+                  :disabled="isGeneratingPDF"
+                  class="ml-2 border-white/40 bg-white/20 hover:bg-white/30 disabled:opacity-50"
+                  title="Export New Claims to PDF"
+                >
+                  <Loader2 v-if="isGeneratingPDF && generatingEmployeeId === employeeId" class="h-4 w-4 mr-1 animate-spin" />
+                  <Download v-else class="h-4 w-4 mr-1" />
+                  PDF
+                </Button>
+                
+                <!-- Redownload Button (icon only, green style) -->
+                <Button 
+                  v-if="hasDownloadedClaims(employeeId)"
+                  variant="outline" 
+                  size="sm"
+                  @click.stop="generateEmployeePDF(employeeId, true)"
+                  :disabled="isGeneratingPDF"
+                  class="ml-1 border-green-500/40 bg-green-500/80 hover:bg-green-600/80 text-white disabled:opacity-50"
+                  title="Redownload All Claims (including previously downloaded)"
+                >
+                  <Loader2 v-if="isGeneratingPDF && generatingEmployeeId === employeeId" class="h-4 w-4 animate-spin" />
+                  <ClockArrowDown v-else class="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <div class="flex items-center space-x-4">
               <div class="text-sm text-primary-foreground/70">
@@ -1568,6 +1828,12 @@ const getTotalNotes = (request) => {
                                   <div v-if="request.is_travel" class="text-xs text-muted-foreground">
                                     From: {{ request.start_location }}<br>
                                     To: {{ request.destination }}
+                                  </div>
+                                  <div v-if="request.receipt_url" class="text-xs text-muted-foreground">
+                                    Receipt: {{ request.receipt_url }}
+                                  </div>
+                                  <div v-if="request.receipt_url_2" class="text-xs text-muted-foreground">
+                                    Receipt 2: {{ request.receipt_url_2 }}
                                   </div>
                                 </TableCell>
                                 <TableCell class="py-2">
@@ -1793,7 +2059,7 @@ const getTotalNotes = (request) => {
 }
 
 .ease-in {
-  transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
 }
 
 .ease-out {
