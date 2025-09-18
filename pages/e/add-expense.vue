@@ -505,7 +505,8 @@
       uploadProgress.value[expenseId] = 0
       
       // Create a unique file path using user ID and timestamp
-      const filePath = `${user.value.id}/${Date.now()}-${file.name}`
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+      const filePath = `${user.value.id}/${Date.now()}-${sanitizedFileName}`
       
       // Create a custom upload handler to track progress
       const xhr = new XMLHttpRequest()
@@ -1279,7 +1280,8 @@
       uploadStatus.value[expenseId] = 'uploading'
       uploadProgress.value[expenseId] = 0
 
-      const filePath = `${user.value.id}/${Date.now()}-second-${file.name}`
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+      const filePath = `${user.value.id}/${Date.now()}-${sanitizedFileName}`
       const { error: uploadError } = await client.storage
         .from('receipts')
         .upload(filePath, file, {
