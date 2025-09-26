@@ -929,6 +929,20 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
               descriptionContent.push({ text: `\nFrom: ${request.start_location} To: ${request.destination}`, fontSize: 8, color: '#666' })
             }
 
+            // Add claim notes to description
+            if (request.notes && request.notes.length > 0) {
+              descriptionContent.push({ text: '\nNotes:', fontSize: 8, color: '#666', bold: true })
+              request.notes.forEach(note => {
+                const noteDate = new Date(note.created_at).toLocaleDateString()
+                descriptionContent.push({ 
+                  text: `\n${note.role.toUpperCase()}: ${note.note} (${noteDate})`, 
+                  fontSize: 8, 
+                  color: '#333',
+                  margin: [0, 1, 0, 1]
+                })
+              })
+            }
+
             // Process and add receipts to description
             if (request.receipt_url) {
               try {
@@ -1829,10 +1843,10 @@ const convertPdfToImage = async (receiptUrl: string): Promise<string | null> => 
                                     From: {{ request.start_location }}<br>
                                     To: {{ request.destination }}
                                   </div>
-                                  <div v-if="request.receipt_url" class="text-xs text-muted-foreground">
+                                  <div v-if="request.receipt_url" class="text-xs text-muted-foreground sr-only">
                                     Receipt: {{ request.receipt_url }}
                                   </div>
-                                  <div v-if="request.receipt_url_2" class="text-xs text-muted-foreground">
+                                  <div v-if="request.receipt_url_2" class="text-xs text-muted-foreground sr-only">
                                     Receipt 2: {{ request.receipt_url_2 }}
                                   </div>
                                 </TableCell>
