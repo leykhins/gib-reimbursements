@@ -929,6 +929,20 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
               descriptionContent.push({ text: `\nFrom: ${request.start_location} To: ${request.destination}`, fontSize: 8, color: '#666' })
             }
 
+            // Add claim notes to description
+            if (request.notes && request.notes.length > 0) {
+              descriptionContent.push({ text: '\nNotes:', fontSize: 8, color: '#666', bold: true })
+              request.notes.forEach(note => {
+                const noteDate = new Date(note.created_at).toLocaleDateString()
+                descriptionContent.push({ 
+                  text: `\n${note.role.toUpperCase()}: ${note.note} (${noteDate})`, 
+                  fontSize: 8, 
+                  color: '#333',
+                  margin: [0, 1, 0, 1]
+                })
+              })
+            }
+
             // Process and add receipts to description
             if (request.receipt_url) {
               try {
@@ -1004,20 +1018,6 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
                 console.error('Error processing receipt 2:', err)
                 descriptionContent.push({ text: '\nReceipt 2: Error loading', fontSize: 8, color: '#888', fontStyle: 'italic' })
               }
-            }
-            
-            // Add claim notes to description
-            if (request.notes && request.notes.length > 0) {
-              descriptionContent.push({ text: '\nNotes:', fontSize: 8, color: '#666', bold: true })
-              request.notes.forEach(note => {
-                const noteDate = new Date(note.created_at).toLocaleDateString()
-                descriptionContent.push({ 
-                  text: `\n${note.role.toUpperCase()}: ${note.note} (${noteDate})`, 
-                  fontSize: 8, 
-                  color: '#333',
-                  margin: [0, 1, 0, 1]
-                })
-              })
             }
             
             // Then in the table body push:
