@@ -50,6 +50,7 @@
   const secondReceiptUrls = ref<Record<number, string>>({})
   const secondReceiptPaths = ref<Record<number, string>>({})
   const showSecondReceipt = ref(false)
+  const lastSelectedDate = ref<DateValue>(today(getLocalTimeZone()))
 
   // Get the runtime config
   const config = useRuntimeConfig()
@@ -174,6 +175,9 @@
   const dbCategories = ref<any[]>([])
   const dbSubcategories = ref<any[]>([])
   const categoriesLoading = ref(true)
+
+  //Set the last selected date to the first expense date
+  lastSelectedDate.value = expenses.value[0].date
 
   // Fetch categories and subcategories from database on component mount
   const fetchCategories = async () => {
@@ -362,7 +366,7 @@
       amount: '',
       gst_amount: '',
       pst_amount: '',
-      date: previousExpense ? previousExpense.date : today(getLocalTimeZone()),
+      date: previousExpense?.date ?? lastSelectedDate.value,
       categoryId: '',
       subcategoryId: '',
       subcategoryMappingId: '',
@@ -383,7 +387,7 @@
         startLocation: '', 
         destination: '', 
         distance: '',
-        date: today(getLocalTimeZone()),
+        date: lastSelectedDate.value,
         datePopoverOpen: false,
         subcategoryMappingId: '',
       }]
@@ -1014,15 +1018,16 @@
       ? expenses.value[expenseIndex].mileageEntries[expenses.value[expenseIndex].mileageEntries.length - 1].subcategoryMappingId 
       : '';
     
-    // Create a new DateValue using today() from @internationalized/date
-    const todayDate = today(getLocalTimeZone())
+    // Use last selected date
+    const previousEntry = expenses.value[expenseIndex].mileageEntries[expenses.value[expenseIndex].mileageEntries.length - 1]
+    const defaultDate = previousEntry?.date ?? expenses.value[expenseIndex].date ?? lastSelectedDate.value
     
     expenses.value[expenseIndex].mileageEntries.push({
       jobNumber: '',
       startLocation: '',
       destination: '',
       distance: '',
-      date: todayDate, // Use the DateValue directly
+      date: defaultDate, // Use the DateValue directly
       datePopoverOpen: false,
       subcategoryMappingId: previousSubcategoryId
     })
@@ -1568,7 +1573,7 @@
                       v-model="expense.date"
                       :max-value="today(getLocalTimeZone())" 
                       initial-focus 
-                      @update:model-value="() => expense.datePopoverOpen = false"
+                      @update:model-value="() => { expense.datePopoverOpen = false; lastSelectedDate.value = expense.date }"
                     />
                   </PopoverContent>
                 </Popover>
@@ -1690,9 +1695,11 @@
                           <PopoverContent class="w-auto p-0">
                             <Calendar 
                               v-model="entry.date"
-                              initial-focus 
+                              initial-focus
+                              :max-value="today(getLocalTimeZone())" 
                               @update:model-value="() => {
                                 entry.datePopoverOpen = false;
+                                lastSelectedDate.value = entry.date
                               }"
                             />
                           </PopoverContent>

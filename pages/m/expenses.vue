@@ -198,11 +198,18 @@ const fetchCategories = async () => {
   }
 }
 
-// Fetch reimbursement requests - update to get all department expenses
-const fetchReimbursementRequests = async () => {
+// Fetch reimbursement requests for a specific month/year - update to get all department expenses
+const fetchReimbursementRequests = async (month = null, year = null) => {
   try {
     loading.value = true
     error.value = null
+    
+    const targetMonth = month !== null ? month : selectedMonth.value
+    const targetYear = year !== null ? year : selectedYear.value
+    
+    // Calculate date range for the month
+    const startDate = new Date(targetYear, targetMonth, 1)
+    const endDate = new Date(targetYear, targetMonth + 1, 0) // Last day of the month
     
     // First get the manager's department
     const { data: managerData, error: managerError } = await client
@@ -237,7 +244,7 @@ const fetchReimbursementRequests = async () => {
       return
     }
     
-    // Now get claims only for employees in the department
+    // Now get claims only for employees in the department for the specific month
     const { data, error: fetchError } = await client
       .from('claims')
       .select(`
@@ -259,6 +266,8 @@ const fetchReimbursementRequests = async () => {
         )
       `)
       .in('employee_id', employeeIds)
+      .gte('date', startDate.toISOString().split('T')[0])
+      .lte('date', endDate.toISOString().split('T')[0])
       .order('date', { ascending: false })
     
     if (fetchError) throw fetchError
@@ -269,7 +278,15 @@ const fetchReimbursementRequests = async () => {
       return claim.users && claim.users.department === managerDepartment.value
     })
     
-    reimbursementRequests.value = departmentClaims
+    // If this is the initial load or same month, replace the data
+    if (month === null || (month === selectedMonth.value && year === selectedYear.value)) {
+      reimbursementRequests.value = departmentClaims
+    } else {
+      // Otherwise, merge with existing data (avoid duplicates)
+      const existingIds = new Set(reimbursementRequests.value.map(claim => claim.id))
+      const newClaims = departmentClaims.filter(claim => !existingIds.has(claim.id))
+      reimbursementRequests.value = [...reimbursementRequests.value, ...newClaims]
+    }
     
     applyFilters()
   } catch (err) {
@@ -504,12 +521,38 @@ watch(() => filters.value.categoryId, () => {
 // Add these new methods
 const changeMonth = (newMonth) => {
   selectedMonth.value = newMonth
-  applyFilters()
+  
+  // Check if we already have data for this month/year
+  const hasDataForMonth = reimbursementRequests.value.some(request => {
+    const requestDate = new Date(request.date)
+    return requestDate.getMonth() === newMonth && requestDate.getFullYear() === selectedYear.value
+  })
+  
+  // If we don't have data for this month, fetch it
+  if (!hasDataForMonth) {
+    fetchReimbursementRequests(newMonth, selectedYear.value)
+  } else {
+    // Just apply filters to existing data
+    applyFilters()
+  }
 }
 
 const changeYear = (newYear) => {
   selectedYear.value = newYear
-  applyFilters()
+  
+  // Check if we already have data for this year
+  const hasDataForYear = reimbursementRequests.value.some(request => {
+    const requestDate = new Date(request.date)
+    return requestDate.getFullYear() === newYear
+  })
+  
+  // If we don't have data for this year, fetch it
+  if (!hasDataForYear) {
+    fetchReimbursementRequests(selectedMonth.value, newYear)
+  } else {
+    // Just apply filters to existing data
+    applyFilters()
+  }
 }
 
 // Add bulk approval methods

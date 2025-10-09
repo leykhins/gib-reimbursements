@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getReceiptSignedUrl } from '~/lib/utils'
+import RejectedClaims from '@/components/RejectedClaims.vue'
 
 definePageMeta({
   layout: 'employee',
@@ -29,7 +30,7 @@ const user = useSupabaseUser()
 const reimbursementRequests = ref([])
 const loading = ref(true)
 const error = ref(null)
-const categories = ref({})
+const categories = ref([])
 const subcategories = ref({})
 
 // Store signed URLs for receipts
@@ -102,6 +103,47 @@ const viewRejectionDetails = (request) => {
   }
 }
 
+// Fetch categories
+const fetchCategories = async () => {
+  try {
+    const { data: categoryData, error: categoryError } = await client
+      .from('claim_categories')
+      .select(`
+        id,
+        category_name,
+        category_subcategory_mapping!inner (
+          id,
+          requires_job_number,
+          requires_employee_name,
+          requires_client_info,
+          subcategory:claim_subcategories (
+            id,
+            subcategory_name
+          )
+        )
+      `)
+      .order('category_name')
+    
+    if (categoryError) throw categoryError
+    
+    // Transform the data to match the expected structure
+    categories.value = categoryData?.map(category => ({
+      id: category.id,
+      name: category.category_name,
+      expense_subcategories: category.category_subcategory_mapping.map(mapping => ({
+        id: mapping.subcategory.id,
+        name: mapping.subcategory.subcategory_name,
+        mapping_id: mapping.id,
+        requires_job_number: mapping.requires_job_number,
+        requires_employee_name: mapping.requires_employee_name,
+        requires_client_info: mapping.requires_client_info
+      }))
+    })) || []
+  } catch (err) {
+    console.error('Error fetching categories:', err)
+  }
+}
+
 // Fetch categories and reimbursement requests
 const fetchReimbursementRequests = async () => {
   try {
@@ -135,6 +177,8 @@ const fetchReimbursementRequests = async () => {
         date,
         created_at,
         employee_id,
+        category_id,
+        subcategory_mapping_id,
         employee:users!claims_employee_id_fkey (
           first_name,
           last_name
@@ -164,9 +208,22 @@ const fetchReimbursementRequests = async () => {
   }
 }
 
+// Add this new method
+const handleClaimUpdate = (claimId, updatedData) => {
+  // Find and update the claim in the local array
+  const claimIndex = reimbursementRequests.value.findIndex(claim => claim.id === claimId)
+  if (claimIndex !== -1) {
+    reimbursementRequests.value[claimIndex] = {
+      ...reimbursementRequests.value[claimIndex],
+      ...updatedData
+    }
+  }
+}
+
 // Fetch data on component mount
-onMounted(() => {
-  fetchReimbursementRequests()
+onMounted(async () => {
+  await fetchCategories()
+  await fetchReimbursementRequests()
 })
 
 // Format currency
@@ -240,6 +297,11 @@ const monthlyChangeText = computed(() => {
   const amount = Math.abs(monthlyChangeAmount.value)
   const direction = monthlyChangeAmount.value >= 0 ? '↑' : '↓'
   return `${direction} ${formatCurrency(amount)} from last month`
+})
+
+// Add this computed property after the existing ones
+const rejectedClaimsCount = computed(() => {
+  return reimbursementRequests.value.filter(request => request.status === 'rejected').length
 })
 </script>
 
@@ -328,147 +390,163 @@ const monthlyChangeText = computed(() => {
       </template>
     </div>
     
-    <!-- Main Table Card -->
-    <Card class="shadow-none">
-      <CardHeader>
-        <CardTitle class="text-base">Reimbursement History</CardTitle>
-        <CardDescription class="text-xs">Your recent expense submissions</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <!-- Loading State -->
-        <div v-if="loading">
-          <Table>
-            <TableHeader class="bg-gray-100">
-              <TableRow>
-                <TableHead v-for="header in ['Description', 'Amount', 'Job #', 'Category', 'Date', 'Status', 'Receipt']" 
-                           :key="header" 
-                           class="uppercase text-xs font-medium"
-                >
-                  {{ header }}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="i in 5" :key="i">
-                <TableCell v-for="j in 7" :key="j" class="py-3">
-                  <Skeleton :class="{'h-3 w-full': j === 1, 
-                                   'h-3 w-16': j === 2, 
-                                   'h-3 w-12': j === 3,
-                                   'h-3 w-24': j === 4,
-                                   'h-3 w-20': j === 5,
-                                   'h-5 w-20': j === 6,
-                                   'h-7 w-16': j === 7}" />
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
-        
-        <!-- Error State -->
-        <div v-else-if="error" class="text-center py-4">
-          <p class="text-red-500 text-xs">Error: {{ error }}</p>
-        </div>
-        
-        <!-- Content State -->
-        <div v-else>
-          <div v-if="reimbursementRequests.length === 0" class="text-center py-4">
-            <p class="text-muted-foreground text-xs">No reimbursement requests found</p>
-          </div>
-          <div v-else>
-            <Table>
-              <TableHeader class="bg-gray-100">
-                <TableRow>
-                  <TableHead class="uppercase text-xs font-medium">Reference #</TableHead>
-                  <TableHead class="uppercase text-xs font-medium">Category</TableHead>
-                  <TableHead class="uppercase text-xs font-medium">Description</TableHead>
-                  <TableHead class="uppercase text-xs font-medium">Amount</TableHead>
-                  <TableHead class="uppercase text-xs font-medium">Date</TableHead>
-                  <TableHead class="uppercase text-xs font-medium">Status</TableHead>
-                  <TableHead class="uppercase text-xs font-medium">Receipt</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="request in topFiveRequests" :key="request.id">
-                  <TableCell class="text-xs py-3">
-                    <template v-if="request.claim_categories?.requires_license_number">
-                      License: {{ request.license_number || 'N/A' }}
-                    </template>
-                    <template v-else>
-                      Job: {{ request.job_number || 'N/A' }}
-                    </template>
-                  </TableCell>
-                  <TableCell class="text-xs py-3">
-                    <div class="font-medium">{{ request.claim_categories?.category_name }}</div>
-                    <div class="text-muted-foreground">{{ request.category_subcategory_mapping?.claim_subcategories?.subcategory_name }}</div>
-                  </TableCell>
-                  <TableCell class="text-xs py-3">
-                    <div class="font-medium">Note: {{ request.description }}</div>
-                    <div v-if="request.related_employee" class="text-muted-foreground">
-                      Employee: {{ request.related_employee }}
-                    </div>
-                    <div v-if="request.client_name || request.company_name" class="text-muted-foreground">
-                      Client: {{ request.client_name }}
-                      <template v-if="request.company_name">
-                        ({{ request.company_name }})
-                      </template>
-                    </div>
-                    <div v-if="request.is_travel" class="text-muted-foreground">
-                      From: {{ request.start_location }}<br>
-                      To: {{ request.destination }}
-                    </div>
-                  </TableCell>
-                  <TableCell class="text-xs py-3">
-                    <div>{{ formatCurrency(request.amount) }}</div>
-                    <div class="text-muted-foreground">
-                      GST: {{ formatCurrency(request.gst_amount || 0) }}<br>
-                      PST: {{ formatCurrency(request.pst_amount || 0) }}
-                    </div>
-                  </TableCell>
-                  <TableCell class="text-xs py-3">{{ formatDate(request.date) }}</TableCell>
-                  
-                  <TableCell class="py-3">
-                    <span 
-                      :class="{
-                        'bg-yellow-100 text-yellow-800': request.status === 'pending',
-                        'bg-green-100 text-green-800': ['approved', 'verified', 'processed'].includes(request.status),
-                        'bg-red-100 text-red-800': request.status === 'rejected'
-                      }"
-                      class="px-2 py-0.5 rounded-full text-xs inline-flex items-center gap-1"
+    <!-- Claims Section - Dynamic Layout -->
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8">
+      <!-- Recent Claims - Dynamic width based on rejected claims -->
+      <div :class="rejectedClaimsCount > 0 ? 'lg:col-span-3' : 'lg:col-span-5'">
+        <Card class="shadow-none h-full">
+          <CardHeader>
+            <CardTitle class="text-base">Recent Claims</CardTitle>
+            <CardDescription class="text-xs">Your recent expense submissions</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <!-- Loading State -->
+            <div v-if="loading">
+              <Table>
+                <TableHeader class="bg-gray-100 rounded-md">
+                  <TableRow>
+                    <TableHead v-for="header in ['Description', 'Amount', 'Job #', 'Category', 'Date', 'Status', 'Receipt']" 
+                               :key="header" 
+                               class="uppercase text-xs font-medium"
                     >
-                      <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
-                      <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
-                      <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
-                      <span class="font-medium">
-                        {{ formatStatus(request.status) }}
-                        <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">: {{ request.rejection_reason }}</span>
-                      </span>
-                    </span>
-                  </TableCell>
-                  <TableCell class="py-3">
-                    <Button 
-                      v-if="request.receipt_url" 
-                      @click="viewReceipt(request.receipt_url, request.receipt_url_2)"
-                      variant="outline" 
-                      size="sm"
-                      class="h-7 w-7 p-0 rounded-md bg-secondary text-white hover:bg-orange-700"
-                    >
-                      <FileText class="h-4 w-4" />
-                    </Button>
-                    <span v-else class="text-muted-foreground text-xs">No receipt</span>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-            
-            <div class="flex justify-end mt-4">
-              <Button variant="outline" size="sm" @click="$router.push('/e/expenses')" class="text-xs">
-                View All Requests
-              </Button>
+                      {{ header }}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-for="i in 5" :key="i">
+                    <TableCell v-for="j in 7" :key="j" class="py-3">
+                      <Skeleton :class="{'h-3 w-full': j === 1, 
+                                       'h-3 w-16': j === 2, 
+                                       'h-3 w-12': j === 3,
+                                       'h-3 w-24': j === 4,
+                                       'h-3 w-20': j === 5,
+                                       'h-5 w-20': j === 6,
+                                       'h-7 w-16': j === 7}" />
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
             </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+            
+            <!-- Error State -->
+            <div v-else-if="error" class="text-center py-4">
+              <p class="text-red-500 text-xs">Error: {{ error }}</p>
+            </div>
+            
+            <!-- Content State -->
+            <div v-else>
+              <div v-if="reimbursementRequests.length === 0" class="text-center py-4">
+                <p class="text-muted-foreground text-xs">No reimbursement requests found</p>
+              </div>
+              <div v-else>
+                <Table class="rounded-md">
+                  <TableHeader class="bg-gray-100 rounded-md">
+                    <TableRow>
+                      <TableHead class="uppercase text-xs font-medium">Reference #</TableHead>
+                      <TableHead class="uppercase text-xs font-medium">Category</TableHead>
+                      <TableHead class="uppercase text-xs font-medium">Description</TableHead>
+                      <TableHead class="uppercase text-xs font-medium">Amount</TableHead>
+                      <TableHead class="uppercase text-xs font-medium">Date</TableHead>
+                      <TableHead class="uppercase text-xs font-medium">Status</TableHead>
+                      <TableHead class="uppercase text-xs font-medium">Receipt</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow v-for="request in topFiveRequests" :key="request.id">
+                      <TableCell class="text-xs py-3">
+                        <template v-if="request.claim_categories?.requires_license_number">
+                          License: {{ request.license_number || 'N/A' }}
+                        </template>
+                        <template v-else>
+                          Job: {{ request.job_number || 'N/A' }}
+                        </template>
+                      </TableCell>
+                      <TableCell class="text-xs py-3">
+                        <div class="font-medium">{{ request.claim_categories?.category_name }}</div>
+                        <div class="text-muted-foreground">{{ request.category_subcategory_mapping?.claim_subcategories?.subcategory_name }}</div>
+                      </TableCell>
+                      <TableCell class="text-xs py-3">
+                        <div class="font-medium">Note: {{ request.description }}</div>
+                        <div v-if="request.related_employee" class="text-muted-foreground">
+                          Employee: {{ request.related_employee }}
+                        </div>
+                        <div v-if="request.client_name || request.company_name" class="text-muted-foreground">
+                          Client: {{ request.client_name }}
+                          <template v-if="request.company_name">
+                            ({{ request.company_name }})
+                          </template>
+                        </div>
+                        <div v-if="request.is_travel" class="text-muted-foreground">
+                          From: {{ request.start_location }}<br>
+                          To: {{ request.destination }}
+                        </div>
+                      </TableCell>
+                      <TableCell class="text-xs py-3">
+                        <div>{{ formatCurrency(request.amount) }}</div>
+                        <div class="text-muted-foreground">
+                          GST: {{ formatCurrency(request.gst_amount || 0) }}<br>
+                          PST: {{ formatCurrency(request.pst_amount || 0) }}
+                        </div>
+                      </TableCell>
+                      <TableCell class="text-xs py-3">{{ formatDate(request.date) }}</TableCell>
+                      
+                      <TableCell class="py-3">
+                        <span 
+                          :class="{
+                            'bg-yellow-100 text-yellow-800': request.status === 'pending',
+                            'bg-green-100 text-green-800': ['approved', 'verified', 'processed'].includes(request.status),
+                            'bg-red-100 text-red-800': request.status === 'rejected'
+                          }"
+                          class="px-2 py-0.5 rounded-full text-xs inline-flex items-center gap-1"
+                        >
+                          <Clock v-if="request.status === 'pending'" class="h-3 w-3" />
+                          <CheckCircle v-if="['approved', 'verified', 'processed'].includes(request.status)" class="h-3 w-3" />
+                          <XCircle v-if="request.status === 'rejected'" class="h-3 w-3" />
+                          <span class="font-medium">
+                            {{ formatStatus(request.status) }}
+                            <span v-if="request.status === 'rejected' && request.rejection_reason" class="font-normal">: {{ request.rejection_reason }}</span>
+                          </span>
+                        </span>
+                      </TableCell>
+                      <TableCell class="py-3">
+                        <Button 
+                          v-if="request.receipt_url" 
+                          @click="viewReceipt(request.receipt_url, request.receipt_url_2)"
+                          variant="outline" 
+                          size="sm"
+                          class="h-7 w-7 p-0 rounded-md bg-secondary text-white hover:bg-orange-700"
+                        >
+                          <FileText class="h-4 w-4" />
+                        </Button>
+                        <span v-else class="text-muted-foreground text-xs">No receipt</span>
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+                
+                <div class="flex justify-end mt-4">
+                  <Button variant="outline" size="sm" @click="$router.push('/e/expenses')" class="text-xs">
+                    View All Requests
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <!-- Claims that Require Attention - Only show if there are rejected claims -->
+      <div v-if="rejectedClaimsCount > 0" class="lg:col-span-2">
+        <RejectedClaims 
+          :claims="reimbursementRequests"
+          :categories="categories"
+          :loading="loading"
+          @update-claim="handleClaimUpdate"
+          @refresh-claims="fetchReimbursementRequests"
+        />
+      </div>
+    </div>
 
     <!-- Receipt Dialog -->
     <ReceiptViewer
