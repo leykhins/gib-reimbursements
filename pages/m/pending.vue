@@ -196,9 +196,20 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
     const targetMonth = month !== null ? month : selectedMonth.value
     const targetYear = year !== null ? year : selectedYear.value
     
+    // Helper function to format date as YYYY-MM-DD without timezone conversion
+    const formatDateString = (year, month, day) => {        
+      const y = String(year)
+      const m = String(month + 1).padStart(2, '0')
+      const d = String(day).padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+    
     // Calculate date range for the month
-    const startDate = new Date(targetYear, targetMonth, 1)
-    const endDate = new Date(targetYear, targetMonth + 1, 0) // Last day of the month
+    const startDateStr = formatDateString(targetYear, targetMonth, 1)
+    // Get first day of next month for exclusive end date (includes all of last day)
+    const nextMonth = targetMonth === 11 ? 0 : targetMonth + 1
+    const nextYear = targetMonth === 11 ? targetYear + 1 : targetYear
+    const endDateStr = formatDateString(nextYear, nextMonth, 1)
     
     // First get the manager's department if not already set
     if (!managerDepartment.value) {
@@ -256,8 +267,8 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
       `)
       .eq('status', 'verified')
       .in('employee_id', employeeIds)
-      .gte('date', startDate.toISOString().split('T')[0])
-      .lte('date', endDate.toISOString().split('T')[0])
+      .gte('date', startDateStr)
+      .lt('date', endDateStr)
       .order('date', { ascending: false })
     
     if (fetchError) throw fetchError
