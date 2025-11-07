@@ -297,6 +297,8 @@
               subcategoryName.includes('admin')
       case 'isCompanyEvent':
         return subcategoryName.includes('company event')
+      case 'description':
+        return categoryName.includes('meal') && subcategoryName.includes('jobsite')
       case 'gst':
         return true // Show GST for all categories
       case 'pst':
@@ -1548,6 +1550,19 @@
                     />
                   </div>
                 </div>
+              </div>
+
+              <!-- Description field - for Meal Jobsite expenses -->
+              <div v-if="showField(expense.id, 'description')" class="space-y-2 md:col-span-2">
+                <Label for="description" class="flex items-center">
+                  Description <span class="text-red-500 ml-1">*</span>
+                </Label>
+                <Input 
+                  id="description" 
+                  v-model="expense.description" 
+                  placeholder="Enter description" 
+                  required
+                />
               </div>
               
               <!-- Date field - hide for mileage expenses since we have per-entry dates -->
