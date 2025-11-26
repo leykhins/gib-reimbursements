@@ -918,6 +918,19 @@ const getTotalNotes = (request) => {
   return request.notes?.length || 0
 }
 
+// Helper function to count actionable claims in a category (manager can approve)
+const getActionableClaimsCount = (category) => {
+  let count = 0
+  Object.values(category.jobGroups).forEach(jobGroup => {
+    jobGroup.requests.forEach(request => {
+      if (request.status === 'verified') {
+        count++
+      }
+    })
+  })
+  return count
+}
+
 // Add the managerDepartment ref after other refs
 const managerDepartment = ref<string | null>(null)
 
@@ -1165,6 +1178,12 @@ onMounted(async () => {
                   <div class="flex items-center">
                     <div class="mr-4">
                       <span class="text-xs text-muted-foreground">
+                        <Badge 
+                          v-if="getActionableClaimsCount(organizedData[employeeId].categories[categoryId]) > 0"
+                          class="mr-2 bg-yellow-100 border-yellow-500 text-yellow-500 shadow-none"
+                        >
+                          {{ getActionableClaimsCount(organizedData[employeeId].categories[categoryId]) }} Claims Pending
+                        </Badge>
                         {{ Object.values(organizedData[employeeId].categories[categoryId].jobGroups)
                           .reduce((total, group) => total + group.requests.length, 0) }} Requests
                       </span>
