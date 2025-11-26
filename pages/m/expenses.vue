@@ -551,6 +551,9 @@ const changeMonth = (newMonth) => {
 const changeYear = (newYear) => {
   selectedYear.value = newYear
   
+  // Fetch status indicators for the new year
+  fetchMonthlyStatusIndicators()
+  
   // Check if we already have data for this year
   const hasDataForYear = reimbursementRequests.value.some(request => {
     const requestDate = new Date(request.date)
@@ -711,6 +714,7 @@ const confirmVerification = async () => {
     // Refresh the list and clear selections
     selectedRequests.value.clear()
     await fetchReimbursementRequests()
+    await fetchMonthlyStatusIndicators() // Refresh status indicators
   } catch (err) {
     console.error('Error approving requests:', err)
     toast({
@@ -761,6 +765,7 @@ const confirmRejection = async () => {
     
     // Refresh the list
     await fetchReimbursementRequests()
+    await fetchMonthlyStatusIndicators() // Refresh status indicators
   } catch (err) {
     console.error('Error rejecting request:', err)
     toast({
@@ -774,20 +779,105 @@ const confirmRejection = async () => {
 }
 
 // Add this computed property after other computed properties
+// Add a new ref to store monthly status indicators separately
+const monthlyStatusIndicators = ref({})
+
+// Fetch monthly status indicators for all months in the selected year
+const fetchMonthlyStatusIndicators = async () => {
+  try {
+    // First get the manager's department if not already set
+    if (!managerDepartment.value) {
+      const { data: managerData, error: managerError } = await client
+        .from('users')
+        .select('department')
+        .eq('id', user.value.id)
+        .single()
+      
+      if (managerError) throw managerError
+      managerDepartment.value = managerData?.department || null
+    }
+    
+    if (!managerDepartment.value) return
+    
+    // Get all employees in the manager's department
+    const { data: departmentEmployees, error: employeeError } = await client
+      .from('users')
+      .select('id')
+      .eq('department', managerDepartment.value)
+    
+    if (employeeError) throw employeeError
+    
+    const employeeIds = departmentEmployees?.map(emp => emp.id) || []
+    if (employeeIds.length === 0) return
+    
+    // Calculate date range for the entire year
+    const startDateStr = `${selectedYear.value}-01-01`
+    const endDateStr = `${selectedYear.value + 1}-01-01`
+    
+    // Fetch only date and status for verified and approved claims in this year
+    const { data, error } = await client
+      .from('claims')
+      .select('date, status')
+      .in('employee_id', employeeIds)
+      .in('status', ['verified', 'approved'])
+      .gte('date', startDateStr)
+      .lt('date', endDateStr)
+    
+    if (error) throw error
+    
+    // Initialize all months
+    const status = {}
+    months.forEach((_, index) => {
+      status[index] = undefined
+    })
+    
+    // Process the status data - parse date string directly to avoid timezone issues
+    // Prioritize approved over verified
+    if (data) {
+      data.forEach(claim => {
+        // Parse date string directly (YYYY-MM-DD format)
+        const dateParts = claim.date.split('-')
+        if (dateParts.length === 3) {
+          const year = parseInt(dateParts[0], 10)
+          const month = parseInt(dateParts[1], 10) - 1 // Convert to 0-based month index
+          
+          if (year === selectedYear.value) {
+            if (claim.status === 'approved') {
+              status[month] = 'approved'
+            } else if (claim.status === 'verified' && status[month] !== 'approved') {
+              status[month] = 'verified'
+            }
+          }
+        }
+      })
+    }
+    
+    monthlyStatusIndicators.value = status
+  } catch (err) {
+    console.error('Error fetching monthly status indicators:', err)
+  }
+}
+
+// Update the monthlyClaimStatus computed property to use the separate indicators
 const monthlyClaimStatus = computed(() => {
-  const status = {}
+  // Use the separate status indicators, but also check loaded claims as fallback
+  const status = { ...monthlyStatusIndicators.value }
   
-  // Initialize all months as undefined (no claims)
-  months.forEach((_, index) => {
-    status[index] = undefined
-  })
-  
-  // Only process claims for the selected year
+  // Also process any loaded claims as a fallback/update
   reimbursementRequests.value.forEach(request => {
-    const date = new Date(request.date)
-    if (date.getFullYear() === selectedYear.value) {
-      const month = date.getMonth()
-      status[month] = 'verified'
+    // Parse date string directly to avoid timezone issues
+    const dateParts = request.date.split('-')
+    if (dateParts.length === 3) {
+      const year = parseInt(dateParts[0], 10)
+      const month = parseInt(dateParts[1], 10) - 1 // Convert to 0-based month index
+      
+      if (year === selectedYear.value) {
+        if (request.status === 'approved') {
+          status[month] = 'approved'
+        } else if (request.status === 'verified' && status[month] !== 'approved') {
+          status[month] = 'verified'
+        }
+      }
     }
   })
   
@@ -869,6 +959,7 @@ onMounted(async () => {
   // Ensure fetchAvailableYears runs first to set managerDepartment.value
   await fetchAvailableYears() 
   await fetchCategories()
+  await fetchMonthlyStatusIndicators() // Fetch status indicators for all months
   await fetchReimbursementRequests()
   await fetchUserRole()
   
