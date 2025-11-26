@@ -32,6 +32,7 @@
   import { toast } from '@/components/ui/toast'
   import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
   import { getReceiptSignedUrl } from '~/lib/utils'
+  import { Badge } from '@/components/ui/badge'
 
   definePageMeta({
     layout: 'admin',
@@ -835,6 +836,34 @@
     return request.notes?.length || 0
   }
 
+  // Helper function to count actionable claims in a category (admin can verify)
+  const getActionableClaimsCount = (category) => {
+    let count = 0
+    Object.values(category.jobGroups).forEach(jobGroup => {
+      jobGroup.requests.forEach(request => {
+        if (request.status === 'pending') {
+          count++
+        }
+      })
+    })
+    return count
+  }
+
+  // Helper function to count claims waiting for other steps
+  const getWaitingClaimsCount = (category) => {
+    let count = 0
+    Object.values(category.jobGroups).forEach(jobGroup => {
+      jobGroup.requests.forEach(request => {
+        // Verified: Manager is waiting (admin already verified)
+        // Approved: Accounting is waiting (manager already approved)
+        if (request.status === 'verified' || request.status === 'approved') {
+          count++
+        }
+      })
+    })
+    return count
+  }
+
   // Initialize
   onMounted(async () => {
     await fetchAvailableYears()
@@ -1066,6 +1095,18 @@
                   <div class="flex items-center">
                     <div class="mr-4">
                       <span class="text-xs text-muted-foreground">
+                        <Badge 
+                          v-if="getActionableClaimsCount(organizedData[employeeId].categories[categoryId]) > 0"
+                          class="mr-2 bg-yellow-100 border-yellow-500 text-yellow-500 shadow-none"
+                        >
+                          {{ getActionableClaimsCount(organizedData[employeeId].categories[categoryId]) }} Claims Pending
+                        </Badge>
+                        <Badge 
+                          v-if="getWaitingClaimsCount(organizedData[employeeId].categories[categoryId]) > 0"
+                          class="mr-2 bg-blue-100 border-blue-500 text-blue-500 shadow-none"
+                        >
+                          {{ getWaitingClaimsCount(organizedData[employeeId].categories[categoryId]) }} Claims Waiting
+                        </Badge>
                         {{ Object.keys(organizedData[employeeId].categories[categoryId].jobGroups).length }} Job Groups
                       </span>
                     </div>
