@@ -481,6 +481,9 @@ const changeMonth = (newMonth) => {
 const changeYear = (newYear) => {
   selectedYear.value = newYear
   
+  // Fetch status indicators for the new year
+  fetchMonthlyStatusIndicators()
+  
   // Check if we already have data for this year
   const hasDataForYear = reimbursementRequests.value.some(request => {
     const requestDate = new Date(request.date)
@@ -596,6 +599,7 @@ const confirmVerification = async () => {
     // Refresh the list and clear selections
     selectedRequests.value.clear()
     await fetchReimbursementRequests()
+    await fetchMonthlyStatusIndicators() // Refresh status indicators
   } catch (err) {
     console.error('Error verifying requests:', err)
     toast({
@@ -610,22 +614,73 @@ const confirmVerification = async () => {
   }
 }
 
-// Update the monthlyClaimStatus computed property
+// Add a new ref to store monthly status indicators separately
+const monthlyStatusIndicators = ref({})
+
+// Fetch monthly status indicators for all months in the selected year
+const fetchMonthlyStatusIndicators = async () => {
+  try {
+    // Calculate date range for the entire year
+    const startDateStr = `${selectedYear.value}-01-01`
+    const endDateStr = `${selectedYear.value + 1}-01-01`
+    
+    // Fetch only date and status for approved claims in this year
+    const { data, error } = await client
+      .from('claims')
+      .select('date, status')
+      .eq('status', 'approved')
+      .gte('date', startDateStr)
+      .lt('date', endDateStr)
+    
+    if (error) throw error
+    
+    // Initialize all months
+    const status = {}
+    months.forEach((_, index) => {
+      status[index] = undefined
+    })
+    
+    // Process the status data - parse date string directly to avoid timezone issues
+    if (data) {
+      data.forEach(claim => {
+        // Parse date string directly (YYYY-MM-DD format)
+        const dateParts = claim.date.split('-')
+        if (dateParts.length === 3) {
+          const year = parseInt(dateParts[0], 10)
+          const month = parseInt(dateParts[1], 10) - 1 // Convert to 0-based month index
+          
+          if (year === selectedYear.value) {
+            if (claim.status === 'approved') {
+              status[month] = 'approved'
+            }
+          }
+        }
+      })
+    }
+    
+    monthlyStatusIndicators.value = status
+  } catch (err) {
+    console.error('Error fetching monthly status indicators:', err)
+  }
+}
+
+// Update the monthlyClaimStatus computed property to use the separate indicators
 const monthlyClaimStatus = computed(() => {
-  const status = {}
+  // Use the separate status indicators, but also check loaded claims as fallback
+  const status = { ...monthlyStatusIndicators.value }
   
-  // Initialize all months as undefined (no claims)
-  months.forEach((_, index) => {
-    status[index] = undefined
-  })
-  
-  // Only process claims for the selected year
+  // Also process any loaded claims as a fallback/update
   reimbursementRequests.value.forEach(request => {
-    const date = new Date(request.date)
-    if (date.getFullYear() === selectedYear.value) {
-      const month = date.getMonth()
-      if (request.status === 'approved') {
-        status[month] = 'approved'
+    // Parse date string directly to avoid timezone issues
+    const dateParts = request.date.split('-')
+    if (dateParts.length === 3) {
+      const year = parseInt(dateParts[0], 10)
+      const month = parseInt(dateParts[1], 10) - 1 // Convert to 0-based month index
+      
+      if (year === selectedYear.value) {
+        if (request.status === 'approved') {
+          status[month] = 'approved'
+        }
       }
     }
   })
@@ -771,6 +826,7 @@ onMounted(async () => {
     loading.value = true
     await fetchAvailableYears()
     await fetchCategories()
+    await fetchMonthlyStatusIndicators() // Fetch status indicators for all months
     await fetchReimbursementRequests()
     await fetchUserRole()
   } catch (err) {
