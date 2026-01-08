@@ -5,8 +5,13 @@ import { createClient } from '@supabase/supabase-js'
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   
-  // Initialize Supabase client
-  const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey)
+  // Initialize Supabase client without auto-refresh (server-side doesn't need token refresh)
+  const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  })
   
   // Parse multipart form data
   const formData = await readMultipartFormData(event)

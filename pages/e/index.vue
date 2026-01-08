@@ -391,7 +391,7 @@ const rejectedClaimsCount = computed(() => {
     </div>
     
     <!-- Claims Section - Dynamic Layout -->
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8 items-start">
       <!-- Recent Claims - Dynamic width based on rejected claims -->
       <div :class="rejectedClaimsCount > 0 ? 'lg:col-span-3' : 'lg:col-span-5'">
         <Card class="shadow-none h-full">
