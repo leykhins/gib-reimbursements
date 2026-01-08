@@ -17,8 +17,13 @@ export default defineEventHandler(async (event) => {
     // Get Supabase config
     const config = useRuntimeConfig()
     
-    // Initialize Supabase client
-    const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey)
+    // Initialize Supabase client without auto-refresh (server-side doesn't need token refresh)
+    const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
     
     // Generate unique file name
     const key = `receipts/${Date.now()}-${fileName}`

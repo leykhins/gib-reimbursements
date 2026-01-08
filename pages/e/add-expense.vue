@@ -1686,6 +1686,13 @@
               <!-- Car Mileage specific fields -->
               <div v-else-if="expense.categoryId && dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
                 <div class="grid grid-cols-1 gap-4">
+                  <!-- Mileage note -->
+                  <div class="bg-blue-50 border border-blue-200 rounded-md p-3 mb-2">
+                    <p class="text-sm text-blue-800">
+                      <strong>Note:</strong> Commuting is not a reimbursable expense. This includes travel from your home to the office, a job site, or a client's premises.
+                    </p>
+                  </div>
+                  
                   <!-- Multiple entries for mileage - inline on desktop, stacked on mobile -->
                   <div v-for="(entry, entryIndex) in expense.mileageEntries || [{}]" :key="entryIndex">
                     <div class="grid grid-cols-1 md:grid-cols-12 gap-2">

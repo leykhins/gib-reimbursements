@@ -47,6 +47,13 @@ export default defineNuxtConfig({
       login: '/',
       callback: '/confirm',
       exclude: ['/public/*', '/reset_password', '/request_password_reset', '/signup'],
+    },
+    clientOptions: {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+      }
     }
   },
   nitro: {

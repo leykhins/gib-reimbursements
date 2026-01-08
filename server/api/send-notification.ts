@@ -215,7 +215,12 @@ export default defineEventHandler(async (event) => {
     
     if (error) {
       // Log failed email to database
-      const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey)
+      const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey, {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      })
       
       if (notificationType === 'consolidated_submission' || 
           notificationType === 'employee_consolidated_submission_confirmation' ||
@@ -256,7 +261,12 @@ export default defineEventHandler(async (event) => {
     }
     
     // Log successful email to database
-    const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey)
+    const supabase = createClient(config.public.supabaseUrl, config.public.supabaseKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
     
     if (notificationType === 'consolidated_submission' || 
         notificationType === 'employee_consolidated_submission_confirmation' ||
