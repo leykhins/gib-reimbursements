@@ -15,12 +15,9 @@ import {
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
-import Sidebar from '@/components/Sidebar.vue'
-import { useRoute } from 'vue-router'
 
 const client = useSupabaseClient()
 const user = useSupabaseUser()
-const router = useRouter()
 const route = useRoute()
 const isAccountant = ref(false)
 const isSidebarOpen = ref(false)

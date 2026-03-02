@@ -497,18 +497,18 @@
     }
   }
 
-  const changeYear = (newYear) => {
-    selectedYear.value = newYear
-    
+  watch(selectedYear, (newYear, oldYear) => {
+    if (newYear === oldYear) return
+
     // Fetch status indicators for the new year
     fetchMonthlyStatusIndicators()
-    
+
     // Check if we already have data for this year
     const hasDataForYear = reimbursementRequests.value.some(request => {
       const requestDate = new Date(request.date)
       return requestDate.getFullYear() === newYear
     })
-    
+
     // If we don't have data for this year, fetch it
     if (!hasDataForYear) {
       fetchReimbursementRequests(selectedMonth.value, newYear)
@@ -516,7 +516,7 @@
       // Just apply filters to existing data
       applyFilters()
     }
-  }
+  })
 
   // Add bulk approval methods
   const toggleEmployeeSelection = (employeeId, checked) => {
@@ -650,7 +650,6 @@
         .lt('date', endDateStr)
       
       if (allError) throw allError
-      
       
       // Initialize all months
       const status = {}
@@ -896,7 +895,7 @@
           <SelectTrigger class="h-8 w-full">
             <div class="flex items-center">
               <CalendarIcon class="w-4 h-4 mr-2" />
-              <SelectValue :placeholder="selectedYear" />
+              <SelectValue :placeholder="String(selectedYear)" />
             </div>
           </SelectTrigger>
           <SelectContent>

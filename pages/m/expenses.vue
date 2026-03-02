@@ -548,18 +548,18 @@ const changeMonth = (newMonth) => {
   }
 }
 
-const changeYear = (newYear) => {
-  selectedYear.value = newYear
-  
+watch(selectedYear, (newYear, oldYear) => {
+  if (newYear === oldYear) return
+
   // Fetch status indicators for the new year
   fetchMonthlyStatusIndicators()
-  
+
   // Check if we already have data for this year
   const hasDataForYear = reimbursementRequests.value.some(request => {
     const requestDate = new Date(request.date)
     return requestDate.getFullYear() === newYear
   })
-  
+
   // If we don't have data for this year, fetch it
   if (!hasDataForYear) {
     fetchReimbursementRequests(selectedMonth.value, newYear)
@@ -567,7 +567,7 @@ const changeYear = (newYear) => {
     // Just apply filters to existing data
     applyFilters()
   }
-}
+})
 
 // Add bulk approval methods
 const toggleEmployeeSelection = (employeeId, checked) => {
@@ -814,12 +814,12 @@ const fetchMonthlyStatusIndicators = async () => {
     const startDateStr = `${selectedYear.value}-01-01`
     const endDateStr = `${selectedYear.value + 1}-01-01`
     
-    // Fetch only date and status for verified and approved claims in this year
+    // Fetch all claims except rejected to see what statuses exist
     const { data, error } = await client
       .from('claims')
       .select('date, status')
       .in('employee_id', employeeIds)
-      .in('status', ['verified', 'approved'])
+      .neq('status', 'rejected')
       .gte('date', startDateStr)
       .lt('date', endDateStr)
     
@@ -832,7 +832,7 @@ const fetchMonthlyStatusIndicators = async () => {
     })
     
     // Process the status data - parse date string directly to avoid timezone issues
-    // Prioritize approved over verified
+    // Prioritize pending over verified, but also include approved/completed as verified
     if (data) {
       data.forEach(claim => {
         // Parse date string directly (YYYY-MM-DD format)
@@ -842,9 +842,12 @@ const fetchMonthlyStatusIndicators = async () => {
           const month = parseInt(dateParts[1], 10) - 1 // Convert to 0-based month index
           
           if (year === selectedYear.value) {
-            if (claim.status === 'approved') {
-              status[month] = 'approved'
-            } else if (claim.status === 'verified' && status[month] !== 'approved') {
+            if (claim.status === 'pending') {
+              status[month] = 'pending'
+            } else if (claim.status === 'verified' && status[month] !== 'pending') {
+              status[month] = 'verified'
+            } else if (['approved', 'completed'].includes(claim.status) && status[month] !== 'pending' && status[month] !== 'verified') {
+              // Show approved/completed as verified status
               status[month] = 'verified'
             }
           }
@@ -872,9 +875,12 @@ const monthlyClaimStatus = computed(() => {
       const month = parseInt(dateParts[1], 10) - 1 // Convert to 0-based month index
       
       if (year === selectedYear.value) {
-        if (request.status === 'approved') {
-          status[month] = 'approved'
-        } else if (request.status === 'verified' && status[month] !== 'approved') {
+        if (request.status === 'pending') {
+          status[month] = 'pending'
+        } else if (request.status === 'verified' && status[month] !== 'pending') {
+          status[month] = 'verified'
+        } else if (['approved', 'completed'].includes(request.status) && status[month] !== 'pending' && status[month] !== 'verified') {
+          // Show approved/completed as verified status
           status[month] = 'verified'
         }
       }
@@ -1055,8 +1061,8 @@ onMounted(async () => {
                     v-if="monthlyClaimStatus[index]"
                     class="absolute -top-2 -right-1 w-3 h-3 rounded-full border-2 border-background"
                     :class="{
-                      'bg-red-500': monthlyClaimStatus[index] === 'verified',
-                      'bg-green-500': monthlyClaimStatus[index] === 'approved'
+                      'bg-red-500': monthlyClaimStatus[index] === 'pending',
+                      'bg-green-500': monthlyClaimStatus[index] === 'verified'
                     }"
                   ></div>
                 </button>
