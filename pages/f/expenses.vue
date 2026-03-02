@@ -521,18 +521,18 @@ const changeMonth = (newMonth) => {
   }
 }
 
-const changeYear = (newYear) => {
-  selectedYear.value = newYear
-  
+watch(selectedYear, (newYear, oldYear) => {
+  if (newYear === oldYear) return
+
   // Fetch status indicators for the new year
   fetchMonthlyStatusIndicators()
-  
+
   // Check if we already have data for this year
   const hasDataForYear = reimbursementRequests.value.some(request => {
     const requestDate = new Date(request.date)
     return requestDate.getFullYear() === newYear
   })
-  
+
   // If we don't have data for this year, fetch it
   if (!hasDataForYear) {
     fetchReimbursementRequests(selectedMonth.value, newYear)
@@ -540,7 +540,7 @@ const changeYear = (newYear) => {
     // Just apply filters to existing data
     applyFilters()
   }
-}
+})
 
 // Add bulk approval methods
 const toggleEmployeeSelection = (employeeId, checked) => {
@@ -936,10 +936,250 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
     const monthName = months[selectedMonth.value]
     const yearStr = String(selectedYear.value)
 
-    // Create document content array
-    const docContent = [
+    // Build summary data grouped by job number (no receipts)
+    const summaryJobGroups = new Map()
+    let summaryOverallTotal = 0
+    let summaryOverallGst = 0
+    let summaryOverallPst = 0
+
+    Object.values(employee.categories).forEach(category => {
+      Object.entries(category.jobGroups).forEach(([jobNumber, jobGroup]) => {
+        jobGroup.requests.forEach(request => {
+          if (request.status === 'completed' && (includeDownloaded || !request.pdf_downloaded_at)) {
+            const amount = parseFloat(request.amount) || 0
+            const gst = parseFloat(request.gst_amount) || 0
+            const pst = parseFloat(request.pst_amount) || 0
+
+            const categoryLabel = category.name + (category.subcategoryName ? ` - ${category.subcategoryName}` : '')
+            if (!summaryJobGroups.has(jobNumber)) {
+              summaryJobGroups.set(jobNumber, {
+                jobNumber,
+                requests: [],
+                total: 0,
+                gst: 0,
+                pst: 0
+              })
+            }
+
+            const summaryGroup = summaryJobGroups.get(jobNumber)
+            summaryGroup.requests.push({ request, categoryLabel })
+            summaryGroup.total += amount
+            summaryGroup.gst += gst
+            summaryGroup.pst += pst
+
+            summaryOverallTotal += amount
+            summaryOverallGst += gst
+            summaryOverallPst += pst
+          }
+        })
+      })
+    })
+
+    const buildSummaryDescription = (request) => {
+      const parts = []
+      if (request.description) parts.push(request.description)
+      if (request.related_employee) parts.push(`Employee: ${request.related_employee}`)
+      if (request.client_name) {
+        parts.push(`Client: ${request.client_name}${request.company_name ? ` (${request.company_name})` : ''}`)
+      }
+      if (request.is_travel) {
+        parts.push(`From: ${request.start_location} To: ${request.destination}`)
+      }
+      if (request.notes && request.notes.length > 0) {
+        const notesText = request.notes.map(note => {
+          const noteDate = new Date(note.created_at).toLocaleDateString()
+          return `${note.role.toUpperCase()}: ${note.note} (${noteDate})`
+        }).join(' | ')
+        parts.push(`Notes: ${notesText}`)
+      }
+      return parts.join('\n')
+    }
+
+    const summaryContent = [
       {
         text: 'Expense Reimbursement Summary',
+        style: 'header',
+        alignment: 'center',
+        margin: [0, 0, 0, 6]
+      },
+      {
+        text: 'Summary (no receipts)',
+        style: 'subheader',
+        alignment: 'center',
+        margin: [0, 0, 0, 10]
+      },
+      {
+        text: [
+          { text: 'Employee: ', bold: true },
+          employee.name
+        ],
+        margin: [0, 5, 0, 0]
+      },
+      {
+        text: [
+          { text: 'Department: ', bold: true },
+          employee.department
+        ],
+        margin: [0, 5, 0, 0]
+      },
+      {
+        text: [
+          { text: 'Period: ', bold: true },
+          `${monthName} ${yearStr}`
+        ],
+        margin: [0, 5, 0, 0]
+      }
+    ]
+
+    // Add date range if it exists
+    if (filters.value.dateRange.start || filters.value.dateRange.end) {
+      summaryContent.push({
+        text: [
+          { text: 'Date Range: ', bold: true },
+          filters.value.dateRange.start ? df.format(filters.value.dateRange.start.toDate(getLocalTimeZone())) : '',
+          filters.value.dateRange.start && filters.value.dateRange.end ? ' - ' : '',
+          filters.value.dateRange.end ? df.format(filters.value.dateRange.end.toDate(getLocalTimeZone())) : ''
+        ],
+        margin: [0, 5, 0, 15]
+      })
+    } else {
+      summaryContent[summaryContent.length - 1].margin = [0, 5, 0, 15]
+    }
+
+    const sortJobNumbers = (a, b) => {
+      const aNum = Number(a)
+      const bNum = Number(b)
+      const aIsNum = !Number.isNaN(aNum)
+      const bIsNum = !Number.isNaN(bNum)
+      if (aIsNum && bIsNum) return aNum - bNum
+      return String(a).localeCompare(String(b))
+    }
+
+    Array.from(summaryJobGroups.keys()).sort(sortJobNumbers).forEach(jobNumber => {
+      const summaryGroup = summaryJobGroups.get(jobNumber)
+
+      summaryGroup.requests.sort((a, b) => {
+        const aDate = new Date(a.request.date).getTime()
+        const bDate = new Date(b.request.date).getTime()
+        return aDate - bDate
+      })
+
+      summaryContent.push({
+        text: jobNumber === 'No Job Number' ? 'Job # - No Job Number' : `Job # ${jobNumber}`,
+        style: 'jobHeader',
+        margin: [0, 8, 0, 4]
+      })
+
+      const summaryTableBody = [
+        [
+          { text: 'Date', style: 'tableHeader' },
+          { text: 'Category', style: 'tableHeader' },
+          { text: 'Description', style: 'tableHeader' },
+          { text: 'GST', style: 'tableHeader', alignment: 'right' },
+          { text: 'PST', style: 'tableHeader', alignment: 'right' },
+          { text: 'Amount', style: 'tableHeader', alignment: 'right' }
+        ]
+      ]
+
+      summaryGroup.requests.forEach(({ request, categoryLabel }) => {
+        const amount = parseFloat(request.amount) || 0
+        const gst = parseFloat(request.gst_amount) || 0
+        const pst = parseFloat(request.pst_amount) || 0
+
+        summaryTableBody.push([
+          { text: formatDate(request.date), fontSize: 10 },
+          { text: categoryLabel, fontSize: 9 },
+          { text: buildSummaryDescription(request), fontSize: 9 },
+          { text: formatCurrency(gst), alignment: 'right', fontSize: 10 },
+          { text: formatCurrency(pst), alignment: 'right', fontSize: 10 },
+          { text: formatCurrency(amount), alignment: 'right', fontSize: 10 },
+        ])
+      })
+
+      summaryContent.push({
+        table: {
+          headerRows: 1,
+          widths: ['auto', 'auto', '*', 'auto', 'auto', 'auto'],
+          body: summaryTableBody
+        },
+        layout: 'lightHorizontalLines'
+      })
+
+      summaryContent.push({
+        columns: [
+          { width: '*', text: '' },
+          {
+            width: 'auto',
+            table: {
+              body: [
+                [
+                  { text: 'Job GST:', style: 'subtotalLabel' },
+                  { text: formatCurrency(summaryGroup.gst), style: 'subtotalValue', alignment: 'right' }
+                ],
+                [
+                  { text: 'Job PST:', style: 'subtotalLabel' },
+                  { text: formatCurrency(summaryGroup.pst), style: 'subtotalValue', alignment: 'right' }
+                ],
+                [
+                  { text: 'Job Subtotal:', style: 'subtotalLabel' },
+                  { text: formatCurrency(summaryGroup.total), style: 'subtotalValue', alignment: 'right' }
+                ]
+              ]
+            },
+            layout: {
+              hLineWidth: function(i, node) { return 0; },
+              vLineWidth: function(i, node) { return 0; },
+              paddingLeft: function(i) { return 4; },
+              paddingRight: function(i) { return 4; },
+              paddingTop: function(i) { return 2; },
+              paddingBottom: function(i) { return 2; }
+            },
+            margin: [0, 5, 0, 10]
+          }
+        ]
+      })
+    })
+
+    // Add summary grand total
+    summaryContent.push({
+      columns: [
+        { width: '*', text: '' },
+        {
+          width: 'auto',
+          table: {
+            body: [
+              [
+                { text: 'TOTAL GST:', style: 'totalLabel' },
+                { text: formatCurrency(summaryOverallGst), style: 'totalValue', alignment: 'right' }
+              ],
+              [
+                { text: 'TOTAL PST:', style: 'totalLabel' },
+                { text: formatCurrency(summaryOverallPst), style: 'totalValue', alignment: 'right' }
+              ],
+              [
+                { text: 'TOTAL AMOUNT:', style: 'totalLabel' },
+                { text: formatCurrency(summaryOverallTotal), style: 'totalValue', alignment: 'right' }
+              ]
+            ]
+          },
+          layout: {
+            hLineWidth: function(i, node) { return (i === 0 || i === node.table.body.length) ? 1 : 0; },
+            vLineWidth: function(i, node) { return 0; },
+            hLineColor: function(i) { return '#aaa'; },
+            paddingLeft: function(i) { return 4; },
+            paddingRight: function(i) { return 4; },
+            paddingTop: function(i) { return 3; },
+            paddingBottom: function(i) { return 3; }
+          },
+          margin: [0, 10, 0, 0]
+        }
+      ]
+    })
+
+    // Create detailed document content array (with receipts)
+    const detailContent = [
+      {
+        text: 'Expense Reimbursement Details',
         style: 'header',
         alignment: 'center',
         margin: [0, 0, 0, 10]
@@ -969,7 +1209,7 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
 
     // Add date range if it exists
     if (filters.value.dateRange.start || filters.value.dateRange.end) {
-      docContent.push({
+      detailContent.push({
         text: [
           { text: 'Date Range: ', bold: true },
           filters.value.dateRange.start ? df.format(filters.value.dateRange.start.toDate(getLocalTimeZone())) : '',
@@ -979,7 +1219,7 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
         margin: [0, 5, 0, 15]
       })
     } else {
-      docContent[docContent.length - 1].margin = [0, 5, 0, 15]
+      detailContent[detailContent.length - 1].margin = [0, 5, 0, 15]
     }
 
     // Create separate tables for each category
@@ -1156,14 +1396,14 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
       // Only add this category if it has completed claims
       if (categoryHasCompletedClaims) {
         // Add category header
-        docContent.push({
+        detailContent.push({
           text: category.name + (category.subcategoryName ? ` - ${category.subcategoryName}` : ''),
           style: 'categoryHeader',
           margin: [0, 10, 0, 5]
         })
         
         // Add category table
-        docContent.push({
+        detailContent.push({
           table: {
             headerRows: 1,
             widths: ['auto', 'auto', '*', 'auto', 'auto', 'auto'],
@@ -1173,7 +1413,7 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
         })
         
         // Add category subtotal
-        docContent.push({
+        detailContent.push({
           columns: [
             { width: '*', text: '' },
             {
@@ -1210,7 +1450,7 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
     }
     
     // Add grand total
-    docContent.push({
+    detailContent.push({
       columns: [
         { width: '*', text: '' },
         {
@@ -1247,12 +1487,25 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
 
     // Create document definition
     const docDefinition = {
-      content: docContent,
+      content: [
+        ...detailContent,
+        { text: '', pageBreak: 'after' },
+        ...summaryContent
+      ],
       styles: {
         header: {
           fontSize: 14,
           bold: true,
           margin: [0, 0, 0, 10]
+        },
+        subheader: {
+          fontSize: 10,
+          color: '#555'
+        },
+        jobHeader: {
+          fontSize: 11,
+          bold: true,
+          color: '#333'
         },
         categoryHeader: {
           fontSize: 11,
