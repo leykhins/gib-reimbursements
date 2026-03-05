@@ -127,6 +127,10 @@
     isCompanyEvent: boolean
     option?: string
     datePopoverOpen: boolean
+    liveOutStartDate: DateValue
+    liveOutEndDate: DateValue
+    liveOutStartDatePopoverOpen: boolean
+    liveOutEndDatePopoverOpen: boolean
     mileageEntries?: MileageEntry[]
   }
 
@@ -155,6 +159,10 @@
       isOfficeAdmin: false,
       isCompanyEvent: false,
       datePopoverOpen: false,
+      liveOutStartDate: today(getLocalTimeZone()),
+      liveOutEndDate: today(getLocalTimeZone()),
+      liveOutStartDatePopoverOpen: false,
+      liveOutEndDatePopoverOpen: false,
       mileageEntries: [{ 
         jobNumber: '',
         startLocation: '',
@@ -175,6 +183,9 @@
   const dbCategories = ref<any[]>([])
   const dbSubcategories = ref<any[]>([])
   const categoriesLoading = ref(true)
+  const LIVE_OUT_NIGHT_RATE = 50
+  const LIVE_OUT_MAX_NIGHTS_PER_WEEK = 5
+  const LIVE_OUT_MAX_AMOUNT_PER_WEEK = LIVE_OUT_NIGHT_RATE * LIVE_OUT_MAX_NIGHTS_PER_WEEK
 
   //Set the last selected date to the first expense date
   lastSelectedDate.value = expenses.value[0].date
@@ -258,6 +269,89 @@
     
     return dbSubcategories.value.filter(sc => sc.category_id === expense.categoryId)
   })
+
+  const isMileageCategory = (expense: any): boolean => {
+    const category = dbCategories.value.find(c => c.id === expense.categoryId)
+    return !!category && category.name.toLowerCase().includes('mileage')
+  }
+
+  const isLiveOutAllowanceCategory = (expense: any): boolean => {
+    const category = dbCategories.value.find(c => c.id === expense.categoryId)
+    return !!category && category.name.toLowerCase().includes('live out allowance')
+  }
+
+  const calculateLiveOutWeekdayNights = (startDate: any, endDate: any): number => {
+    if (!startDate || !endDate) return 0
+
+    const start = startDate.toDate(getLocalTimeZone())
+    const end = endDate.toDate(getLocalTimeZone())
+    if (end <= start) return 0
+
+    let nights = 0
+    const cursor = new Date(start)
+
+    while (cursor < end) {
+      const day = cursor.getDay()
+      if (day !== 0 && day !== 6) nights++
+      cursor.setDate(cursor.getDate() + 1)
+    }
+
+    return nights
+  }
+
+  const getLiveOutNights = (expense: any): number => {
+    if (!isLiveOutAllowanceCategory(expense)) return 0
+    return calculateLiveOutWeekdayNights(expense.liveOutStartDate, expense.liveOutEndDate)
+  }
+
+  const getLiveOutWeeklyCappedNights = (expense: any): number => {
+    if (!isLiveOutAllowanceCategory(expense) || !expense.liveOutStartDate || !expense.liveOutEndDate) return 0
+
+    const start = expense.liveOutStartDate.toDate(getLocalTimeZone())
+    const end = expense.liveOutEndDate.toDate(getLocalTimeZone())
+    if (end <= start) return 0
+
+    const weeklyNights: Record<string, number> = {}
+    const cursor = new Date(start)
+
+    while (cursor < end) {
+      const day = cursor.getDay()
+      if (day !== 0 && day !== 6) {
+        const weekStart = new Date(cursor)
+        const dayOffset = (weekStart.getDay() + 6) % 7 // Monday-start week
+        weekStart.setDate(weekStart.getDate() - dayOffset)
+        weekStart.setHours(0, 0, 0, 0)
+        const weekKey = weekStart.toISOString().slice(0, 10)
+
+        weeklyNights[weekKey] = (weeklyNights[weekKey] || 0) + 1
+      }
+      cursor.setDate(cursor.getDate() + 1)
+    }
+
+    return Object.values(weeklyNights).reduce(
+      (sum, nights) => sum + Math.min(nights, LIVE_OUT_MAX_NIGHTS_PER_WEEK),
+      0
+    )
+  }
+
+  const getCappedLiveOutNights = (expense: any): number => {
+    return getLiveOutWeeklyCappedNights(expense)
+  }
+
+  const updateLiveOutAmount = (expenseId: number) => {
+    const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
+    if (expenseIndex === -1) return
+
+    const expense = expenses.value[expenseIndex]
+    if (!isLiveOutAllowanceCategory(expense)) return
+
+    const cappedNights = getCappedLiveOutNights(expense)
+    const amount = cappedNights * LIVE_OUT_NIGHT_RATE
+
+    expense.amount = amount.toFixed(2)
+    expense.gst_amount = '0.00'
+    expense.pst_amount = '0.00'
+  }
 
   // Updated showField function - modify to exclude job number for mileage
   const showField = computed(() => (expenseId: number, fieldName: string) => {
@@ -384,6 +478,10 @@
       isOfficeAdmin: false,
       isCompanyEvent: false,
       datePopoverOpen: false,
+      liveOutStartDate: previousExpense?.liveOutStartDate ?? lastSelectedDate.value,
+      liveOutEndDate: previousExpense?.liveOutEndDate ?? lastSelectedDate.value,
+      liveOutStartDatePopoverOpen: false,
+      liveOutEndDatePopoverOpen: false,
       mileageEntries: [{ 
         jobNumber: '', 
         startLocation: '', 
@@ -676,8 +774,15 @@
           if (categoryName.includes('meal') && !expense.description) {
             expense.description = 'Meal expense';
           }
+          if (isLiveOutAllowanceCategory(expense) && !expense.description) {
+            const start = expense.liveOutStartDate ? df.format(expense.liveOutStartDate.toDate(getLocalTimeZone())) : ''
+            const end = expense.liveOutEndDate ? df.format(expense.liveOutEndDate.toDate(getLocalTimeZone())) : ''
+            const nights = getCappedLiveOutNights(expense)
+            expense.description = `Live Out Allowance: ${nights} weekday night${nights === 1 ? '' : 's'} (${start} to ${end})`
+          }
           
           const isTravel = categoryName.includes('travel');
+          const expenseDate = isLiveOutAllowanceCategory(expense) ? expense.liveOutStartDate : expense.date
           
           allExpensesData.push({
             employee_id: user.value.id,
@@ -686,7 +791,7 @@
             amount: parseFloat(expense.amount),
             gst_amount: parseFloat(expense.gst_amount || '0'),
             pst_amount: parseFloat(expense.pst_amount || '0'),
-            date: expense.date.toDate(getLocalTimeZone()),
+            date: expenseDate.toDate(getLocalTimeZone()),
             is_travel: isTravel,
             travel_distance: isTravel && expense.distance ? parseFloat(expense.distance) : null,
             travel_type: isTravel ? 'public_transport' : null,
@@ -941,8 +1046,10 @@
     const category = dbCategories.value.find(c => c.id === expense.categoryId)
     if (!category) return true
     
-    // Mileage categories don't require receipts
-    return !category.name.toLowerCase().includes('mileage')
+    const categoryName = category.name.toLowerCase()
+
+    // Mileage and live out allowance categories don't require receipts
+    return !categoryName.includes('mileage') && !categoryName.includes('live out allowance')
   })
 
   // Calculate total amount (excluding tax)
@@ -989,6 +1096,10 @@
       // If it's a parking category, calculate GST based on the provided formula
       if (categoryName.includes('parking') && expense.amount) {
         expenses.value[expenseIndex].gst_amount = calculateParkingGST(expense.amount)
+      }
+
+      if (categoryName.includes('live out allowance')) {
+        updateLiveOutAmount(expenseId)
       }
     }
   }
@@ -1211,6 +1322,11 @@
             }
           }
         }
+      } else if (isLiveOutAllowanceCategory(expense) && expense.liveOutEndDate) {
+        const deadline = calculateClaimDeadline(expense.liveOutEndDate)
+        if (today > deadline) {
+          return true
+        }
       } else if (expense.date) {
         // Check regular expense
         const deadline = calculateClaimDeadline(expense.date)
@@ -1246,6 +1362,15 @@
             }
           }
         })
+      } else if (isLiveOutAllowanceCategory(expense) && expense.liveOutEndDate) {
+        const deadline = calculateClaimDeadline(expense.liveOutEndDate)
+        if (today > deadline) {
+          lateExpenses.push({
+            expenseNumber: index + 1,
+            date: expense.liveOutEndDate.toDate(getLocalTimeZone()),
+            deadline
+          })
+        }
       } else if (expense.date) {
         // Check regular expense
         const deadline = calculateClaimDeadline(expense.date)
@@ -1477,7 +1602,13 @@
                     <Label for="category" class="flex items-center">
                       Expense Category <span class="text-red-500 ml-1">*</span>
                     </Label>
-                    <Select v-model="expense.categoryId" required>
+                    <Select
+                      v-model="expense.categoryId"
+                      @update:modelValue="() => {
+                        handleCategoryChange(expense.id)
+                      }"
+                      required
+                    >
                       <SelectTrigger class="w-full">
                         <SelectValue placeholder="Select category" />
                       </SelectTrigger>
@@ -1566,7 +1697,7 @@
               </div>
               
               <!-- Date field - hide for mileage expenses since we have per-entry dates -->
-              <div v-if="!expense.categoryId || !dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2">
+              <div v-if="!expense.categoryId || (!isMileageCategory(expense) && !isLiveOutAllowanceCategory(expense))" class="space-y-2">
                 <Label for="date" class="flex items-center">
                   Date of Expense <span class="text-red-500 ml-1">*</span>
                 </Label>
@@ -1592,6 +1723,90 @@
                     />
                   </PopoverContent>
                 </Popover>
+              </div>
+
+              <!-- Live Out Allowance date range and calculated amount -->
+              <div v-else-if="isLiveOutAllowanceCategory(expense)" class="space-y-2 md:col-span-2">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div class="space-y-2">
+                    <Label class="flex items-center">
+                      Start Date <span class="text-red-500 ml-1">*</span>
+                    </Label>
+                    <Popover v-model:open="expense.liveOutStartDatePopoverOpen">
+                      <PopoverTrigger as-child>
+                        <Button
+                          variant="outline"
+                          :class="cn(
+                            'w-full justify-start text-left font-normal',
+                            !expense.liveOutStartDate && 'text-muted-foreground',
+                          )"
+                        >
+                          <CalendarIcon class="mr-2 h-4 w-4" />
+                          {{ expense.liveOutStartDate ? df.format(expense.liveOutStartDate.toDate(getLocalTimeZone())) : "Pick a start date" }}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent class="w-auto p-0">
+                        <Calendar
+                          v-model="expense.liveOutStartDate"
+                          :max-value="today(getLocalTimeZone())"
+                          initial-focus
+                          @update:model-value="() => {
+                            expense.liveOutStartDatePopoverOpen = false;
+                            updateLiveOutAmount(expense.id)
+                          }"
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  <div class="space-y-2">
+                    <Label class="flex items-center">
+                      End Date <span class="text-red-500 ml-1">*</span>
+                    </Label>
+                    <Popover v-model:open="expense.liveOutEndDatePopoverOpen">
+                      <PopoverTrigger as-child>
+                        <Button
+                          variant="outline"
+                          :class="cn(
+                            'w-full justify-start text-left font-normal',
+                            !expense.liveOutEndDate && 'text-muted-foreground',
+                          )"
+                        >
+                          <CalendarIcon class="mr-2 h-4 w-4" />
+                          {{ expense.liveOutEndDate ? df.format(expense.liveOutEndDate.toDate(getLocalTimeZone())) : "Pick an end date" }}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent class="w-auto p-0">
+                        <Calendar
+                          v-model="expense.liveOutEndDate"
+                          :max-value="today(getLocalTimeZone())"
+                          initial-focus
+                          @update:model-value="() => {
+                            expense.liveOutEndDatePopoverOpen = false;
+                            updateLiveOutAmount(expense.id)
+                          }"
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 p-4 bg-gray-50 rounded-md">
+                  <div class="space-y-2">
+                    <Label class="flex items-center font-semibold">Eligible Weekday Nights</Label>
+                    <Input :value="getCappedLiveOutNights(expense)" readonly class="bg-gray-100 font-bold" />
+                    <p class="text-xs text-gray-500">
+                      Weekends are excluded. Maximum {{ LIVE_OUT_MAX_NIGHTS_PER_WEEK }} nights per week.
+                    </p>
+                  </div>
+                  <div class="space-y-2">
+                    <Label class="flex items-center font-semibold">Total Amount ($)</Label>
+                    <Input :value="expense.amount" readonly class="bg-gray-100 font-bold" />
+                    <p class="text-xs text-gray-500">
+                      ${{ LIVE_OUT_NIGHT_RATE }} per night. Maximum ${{ LIVE_OUT_MAX_AMOUNT_PER_WEEK }} per week.
+                    </p>
+                  </div>
+                </div>
               </div>
               
               <!-- Job Number -->
@@ -1635,7 +1850,7 @@
               </div>
               
               <!-- Regular expense fields -->
-              <div v-if="!expense.categoryId || !dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
+              <div v-if="!expense.categoryId || (!isMileageCategory(expense) && !isLiveOutAllowanceCategory(expense))" class="space-y-2 md:col-span-2">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <!-- Amount -->
                   <div class="space-y-2">
@@ -1684,7 +1899,7 @@
               </div>
 
               <!-- Car Mileage specific fields -->
-              <div v-else-if="expense.categoryId && dbCategories.find(c => c.id === expense.categoryId)?.name.toLowerCase().includes('mileage')" class="space-y-2 md:col-span-2">
+              <div v-else-if="expense.categoryId && isMileageCategory(expense)" class="space-y-2 md:col-span-2">
                 <div class="grid grid-cols-1 gap-4">
                   <!-- Mileage note -->
                   <div class="bg-blue-50 border border-blue-200 rounded-md p-3 mb-2">
