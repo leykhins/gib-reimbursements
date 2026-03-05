@@ -68,6 +68,13 @@ export default defineEventHandler(async (event) => {
     }
     
     const config = useRuntimeConfig()
+    if (!config.supabaseServiceKey || !config.public.supabaseUrl) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Server misconfiguration: Supabase credentials missing',
+        data: { detail: 'SUPABASE_SERVICE_KEY or SUPABASE_URL not set in environment' }
+      })
+    }
     const supabase = createClient(
       config.public.supabaseUrl,
       config.supabaseServiceKey,
@@ -151,10 +158,12 @@ export default defineEventHandler(async (event) => {
       message: `Successfully sent ${successCount} of ${users.length} invitations`
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
     console.error('Error sending invitations:', error)
     throw createError({
       statusCode: 500,
-      statusMessage: 'Failed to send invitations'
+      statusMessage: 'Failed to send invitations',
+      data: { detail: message }
     })
   }
 }) 

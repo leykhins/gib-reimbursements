@@ -659,7 +659,8 @@ const sendInvitations = async () => {
     }
   } catch (error) {
     console.error('Error processing invitations:', error)
-    inviteErrorMessage.value = `Error: ${error.message}`
+    const detail = error?.data?.detail || error?.message || 'Unknown error'
+    inviteErrorMessage.value = `Error: ${detail}`
   } finally {
     inviteLoading.value = false
     inviteLoadingMessage.value = ''
