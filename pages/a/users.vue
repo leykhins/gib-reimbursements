@@ -141,6 +141,15 @@ const inviteLoadingMessage = ref('')
 const inviteSuccessMessage = ref('')
 const inviteErrorMessage = ref('')
 
+// Confirm invite success and refresh
+const confirmInviteSuccess = () => {
+  showInviteDialog.value = false
+  inviteSuccessMessage.value = ''
+  inviteErrorMessage.value = ''
+  inviteEmails.value = [{ email: '', first_name: '', last_name: '', department: '' }]
+  router.go(0)
+}
+
 // Department filter state - change from array to single value
 const selectedDepartment = ref('')
 
@@ -638,10 +647,9 @@ const sendInvitations = async () => {
     // Calculate success statistics
     const successCount = response.results.filter(r => r.success).length
     
-    // Set success message
+    // Set success message - keep dialog open for confirmation
     if (successCount === inviteEmails.value.length) {
       inviteSuccessMessage.value = `Successfully invited ${successCount} users!`
-      showInviteDialog.value = false // Close dialog on complete success
     } else if (successCount > 0) {
       inviteSuccessMessage.value = `Invited ${successCount} of ${inviteEmails.value.length} users.`
       
@@ -659,7 +667,8 @@ const sendInvitations = async () => {
     }
   } catch (error) {
     console.error('Error processing invitations:', error)
-    inviteErrorMessage.value = `Error: ${error.message}`
+    const detail = error?.data?.detail || error?.message || 'Unknown error'
+    inviteErrorMessage.value = `Error: ${detail}`
   } finally {
     inviteLoading.value = false
     inviteLoadingMessage.value = ''
@@ -1076,10 +1085,17 @@ definePageMeta({
       </div>
       
       <DialogFooter>
-        <Button @click="showInviteDialog = false" variant="outline">Cancel</Button>
-        <Button @click="sendInvitations" :disabled="inviteLoading">
-          Send Invitations
-        </Button>
+        <template v-if="inviteSuccessMessage">
+          <Button @click="confirmInviteSuccess">
+            OK
+          </Button>
+        </template>
+        <template v-else>
+          <Button @click="showInviteDialog = false" variant="outline">Cancel</Button>
+          <Button @click="sendInvitations" :disabled="inviteLoading">
+            Send Invitations
+          </Button>
+        </template>
       </DialogFooter>
     </DialogContent>
   </Dialog>
