@@ -1,4 +1,4 @@
-import { defineEventHandler, readBody } from 'h3'
+import { defineEventHandler, readBody, getRequestHeader } from 'h3'
 import { createClient } from '@supabase/supabase-js'
 
 // Rate limiter implementation
@@ -94,7 +94,7 @@ export default defineEventHandler(async (event) => {
             let siteUrl = config.public.siteUrl
             
             if (!siteUrl) {
-              const origin = event.node.req.headers.origin || event.node.req.headers.host
+              const origin = getRequestHeader(event, 'origin') || getRequestHeader(event, 'host')
               if (origin) {
                 siteUrl = origin.startsWith('http') ? origin : `https://${origin}`
               } else {
@@ -151,7 +151,7 @@ export default defineEventHandler(async (event) => {
       message: `Successfully sent ${successCount} of ${users.length} invitations`
     }
   } catch (error) {
-    console.error('Error sending invitations')
+    console.error('Error sending invitations:', error)
     throw createError({
       statusCode: 500,
       statusMessage: 'Failed to send invitations'
