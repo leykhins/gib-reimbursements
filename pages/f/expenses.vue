@@ -27,7 +27,7 @@ import {
   CheckCircle2,
   XCircle
 } from 'lucide-vue-next'
-import { format } from 'date-fns'
+import { format, endOfMonth, endOfDay, isAfter } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -349,6 +349,12 @@ const formatDate = (date) => {
 const formatDateTime = (date) => {
   if (!date) return ''
   return format(new Date(date), 'MMM d, yyyy h:mm a')
+}
+
+const isLateSubmission = (expenseDate, submittedAt) => {
+  if (!expenseDate || !submittedAt) return false
+  const deadline = endOfDay(addDays(endOfMonth(new Date(expenseDate)), 7))
+  return isAfter(new Date(submittedAt), deadline)
 }
 
 // Update the organizedData computed property
@@ -2129,13 +2135,13 @@ const convertPdfToImage = async (receiptUrl: string): Promise<string | null> => 
                       <span class="text-xs text-muted-foreground">
                         <Badge 
                           v-if="getActionableClaimsCount(organizedData[employeeId].categories[categoryId]) > 0"
-                          class="mr-2 bg-yellow-100 border-yellow-500 text-yellow-500 shadow-none"
+                          class="mr-2 bg-yellow-100 border-yellow-500 text-yellow-500 shadow-none hover:bg-yellow-100 hover:border-yellow-500 hover:text-yellow-500"
                         >
                           {{ getActionableClaimsCount(organizedData[employeeId].categories[categoryId]) }} Claims Pending
                         </Badge>
                         <Badge 
                           v-if="getWaitingClaimsCount(organizedData[employeeId].categories[categoryId]) > 0"
-                          class="mr-2 bg-blue-100 border-blue-500 text-blue-500 shadow-none"
+                          class="mr-2 bg-blue-100 border-blue-500 text-blue-500 shadow-none hover:bg-blue-100 hover:border-blue-500 hover:text-blue-500"
                         >
                           {{ getWaitingClaimsCount(organizedData[employeeId].categories[categoryId]) }} Claims Waiting
                         </Badge>
@@ -2241,7 +2247,17 @@ const convertPdfToImage = async (receiptUrl: string): Promise<string | null> => 
                                   />
                                 </TableCell>
                                 <TableCell class="py-2 text-sm">{{ formatDate(request.date) }}</TableCell>
-                                <TableCell class="py-2 text-sm">{{ formatDateTime(request.created_at) }}</TableCell>
+                                <TableCell class="py-2 text-sm">
+                                  <div class="flex items-center gap-2">
+                                    <span>{{ formatDateTime(request.created_at) }}</span>
+                                    <Badge 
+                                      v-if="isLateSubmission(request.date, request.created_at)"
+                                      class="bg-red-100 border-red-500 text-red-600 shadow-none hover:bg-red-100 hover:border-red-500 hover:text-red-600"
+                                    >
+                                      Late
+                                    </Badge>
+                                  </div>
+                                </TableCell>
                                 <TableCell class="py-2">
                                   <div class="text-sm">{{ request.description }}</div>
                                   <div v-if="request.subcategory_mapping?.subcategory?.subcategory_name" 

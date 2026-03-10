@@ -23,13 +23,14 @@ import {
   CheckCircle,
   Loader2
 } from 'lucide-vue-next'
-import { format } from 'date-fns'
+import { format, addDays, endOfMonth, endOfDay, isAfter } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getReceiptSignedUrl } from '~/lib/utils'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Badge } from '@/components/ui/badge'
 
 definePageMeta({
   layout: 'employee',
@@ -284,6 +285,12 @@ const formatDate = (dateString) => {
 
 const formatDateTime = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy h:mm a')
+}
+
+const isLateSubmission = (expenseDate, submittedAt) => {
+  if (!expenseDate || !submittedAt) return false
+  const deadline = endOfDay(addDays(endOfMonth(new Date(expenseDate)), 7))
+  return isAfter(new Date(submittedAt), deadline)
 }
 
 const formatStatus = (status) => {
@@ -771,7 +778,17 @@ onMounted(async () => {
                           class="hover:bg-muted/50"
                         >
                           <TableCell class="py-2 text-sm">{{ formatDate(claim.date) }}</TableCell>
-                          <TableCell class="py-2 text-sm">{{ formatDateTime(claim.created_at) }}</TableCell>
+                          <TableCell class="py-2 text-sm">
+                            <div class="flex items-center gap-2">
+                              <span>{{ formatDateTime(claim.created_at) }}</span>
+                              <Badge 
+                                v-if="isLateSubmission(claim.date, claim.created_at)"
+                                class="bg-red-100 border-red-500 text-red-600 shadow-none hover:bg-red-100 hover:border-red-500 hover:text-red-600"
+                              >
+                                Late
+                              </Badge>
+                            </div>
+                          </TableCell>
                           <TableCell class="py-2">
                             <div class="text-sm">{{ claim.description }}</div>
                             <div v-if="claim.subcategory_mapping?.subcategory?.subcategory_name" 
