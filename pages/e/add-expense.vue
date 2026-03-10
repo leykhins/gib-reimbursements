@@ -6,7 +6,7 @@
   import { Label } from '@/components/ui/label'
   import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
   import { Calendar } from '@/components/ui/calendar'
-  import { CalendarIcon, Plus, Trash2, Upload, ArrowLeft, Check, X, LoaderCircle } from 'lucide-vue-next'
+  import { CalendarIcon, Plus, Trash2, Upload, ArrowLeft, Check, X, LoaderCircle, AlertTriangle } from 'lucide-vue-next'
   import { useRouter } from 'vue-router'
   import { format, formatISO, parse } from 'date-fns'
   import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -28,6 +28,7 @@
 
   // Add these refs at the top with other refs
   const showDebugModal = ref(false)
+  const showLateSubmissionModal = ref(false)
   const debugData = ref<any>(null)
   const isDragging = ref<Record<number, boolean>>({})
   const dragCounter = ref<Record<number, number>>({})
@@ -1387,6 +1388,12 @@
     return lateExpenses
   })
 
+  watch(hasLateClaims, (isLate) => {
+    if (isLate) {
+      showLateSubmissionModal.value = true
+    }
+  }, { immediate: true })
+
   // Handle second receipt file upload
   const handleSecondFileUpload = async (event: Event, expenseId: number) => {
     const input = event.target as HTMLInputElement
@@ -1491,33 +1498,40 @@
     </div>
 
     <form @submit.prevent="showConfirmModal = true">
-      <div v-if="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+      <div v-if="error" class="bg-red-100 border border-red-400 text-red-600 px-4 py-3 rounded mb-4">
         {{ error }}
       </div>
       
-      <!-- Late Claims Warning -->
-      <div v-if="hasLateClaims" class="bg-yellow-50 border border-yellow-400 text-yellow-800 px-4 py-3 rounded mb-4">
-        <div class="flex items-start">
-          <div class="flex-shrink-0">
-            <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-            </svg>
+      <Dialog v-if="hasLateClaims" :open="showLateSubmissionModal" @update:open="showLateSubmissionModal = $event">
+        <DialogContent class="w-[520px] max-w-[92vw] border-red-700 text-red-700">
+          <DialogHeader>
+            <DialogTitle class="text-red-700 flex items-center gap-2"> <AlertTriangle class="h-5 w-5 text-red-700" /> Late Submission Warning</DialogTitle>
+            <DialogDescription class="text-red-700">
+              This reimbursement has exceeded the submission deadline: <span class="font-bold">7 days after the previous month.</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div class="text-sm">
+            <p>
+              In addition to submitting the request, please send a separate email to the following people in the processing chain to ensure that this reimbursement can be processed retroactively:
+            </p>
+            <ol class="mt-2 list-decimal list-inside pl-4">
+              <li>Chloe</li>
+              <li>Your Manager</li>
+              <li>Mabel</li>
+            </ol>
+            <p class="mt-3 font-semibold">Please note:</p>
+            <ul class="mt-1 list-disc list-inside space-y-1 pl-4">
+              <li>Late submissions create extra work and delays in processing expenses.</li>
+              <li>Our team does not regularly monitor previous months&apos; records to check for items submitted late.</li>
+              <li>All reimbursements must be submitted on time. This policy applies to all expenses, including non-job-related expenses.</li>
+            </ul>
+            <p class="mt-3">Thank you for your cooperation in following the deadlines.</p>
           </div>
-          <div class="ml-3 flex-1">
-            <h3 class="text-sm font-medium">Late Claim Warning</h3>
-            <div class="mt-2 text-sm">
-              <p>
-                <span class="font-semibold">{{ lateClaimsDetails.length }}</span> 
-                claim{{ lateClaimsDetails.length > 1 ? 's' : '' }} 
-                {{ lateClaimsDetails.length > 1 ? 'are' : 'is' }} past the submission deadline.
-              </p>
-              <p class="mt-1 text-xs">
-                Claims must be submitted within 7 days of the following month. Late claims may require manager approval.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+          <DialogFooter>
+            <Button class="w-full bg-red-700 text-white hover:bg-red-800" @click="showLateSubmissionModal = false">Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       
       <Toaster />
       
