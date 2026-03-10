@@ -1,3 +1,5 @@
+import { getLocalTimeZone, parseDate } from '@internationalized/date'
+
 /**
  * Gets a signed URL for a receipt and determines if it's an image
  * @param client Supabase client instance
@@ -47,4 +49,12 @@ export function isImageFile(filename: string): boolean {
   const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
   const lowerCaseFilename = filename.toLowerCase();
   return imageExtensions.some(ext => lowerCaseFilename.endsWith(ext));
+}
+
+/**
+ * Parses a date-only string (YYYY-MM-DD) into a local Date.
+ * If an ISO datetime is passed, only the date part is used.
+ */
+export function parseLocalDateString(dateString: string): Date {
+  return parseDate(dateString.split('T')[0]).toDate(getLocalTimeZone())
 }

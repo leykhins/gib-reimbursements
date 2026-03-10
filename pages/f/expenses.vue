@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar'
 import { addDays } from 'date-fns'
 import { cn } from '@/lib/utils'
-import { getReceiptSignedUrl } from '~/lib/utils'
+import { getReceiptSignedUrl, parseLocalDateString } from '~/lib/utils'
 
 import { 
   CalendarIcon, 
@@ -37,7 +37,6 @@ import {
   DateFormatter,
   type DateValue,
   getLocalTimeZone,
-  parseDate,
   today,
   CalendarDate
 } from '@internationalized/date'
@@ -128,7 +127,7 @@ const fetchAvailableYears = async () => {
     
     // Extract unique years from claims
     const uniqueYears = new Set(
-      data.map(claim => new Date(claim.date).getFullYear())
+      data.map(claim => parseLocalDateString(claim.date).getFullYear())
     )
     
     // Add current year if not present
@@ -274,10 +273,11 @@ const df = new DateFormatter('en-US', {
 // Update the applyFilters function to use CalendarDate
 const applyFilters = () => {
   filteredRequests.value = reimbursementRequests.value.filter(request => {
+    const localRequestDate = parseLocalDateString(request.date)
     const requestDate = new CalendarDate(
-      new Date(request.date).getFullYear(),
-      new Date(request.date).getMonth() + 1,
-      new Date(request.date).getDate()
+      localRequestDate.getFullYear(),
+      localRequestDate.getMonth() + 1,
+      localRequestDate.getDate()
     )
     
     // Month/Year filter
@@ -342,8 +342,7 @@ const applyFilters = () => {
 // Update the formatDate function to handle dates correctly
 const formatDate = (date) => {
   if (!date) return ''
-  const parsedDate = parseDate(date.split('T')[0])
-  return df.format(parsedDate.toDate(getLocalTimeZone()))
+  return df.format(parseLocalDateString(date))
 }
 
 const formatDateTime = (date) => {
@@ -353,7 +352,8 @@ const formatDateTime = (date) => {
 
 const isLateSubmission = (expenseDate, submittedAt) => {
   if (!expenseDate || !submittedAt) return false
-  const deadline = endOfDay(addDays(endOfMonth(new Date(expenseDate)), 7))
+  const localExpenseDate = parseLocalDateString(expenseDate)
+  const deadline = endOfDay(addDays(endOfMonth(localExpenseDate), 7))
   return isAfter(new Date(submittedAt), deadline)
 }
 
@@ -519,7 +519,7 @@ const changeMonth = (newMonth) => {
   
   // Check if we already have data for this month/year
   const hasDataForMonth = reimbursementRequests.value.some(request => {
-    const requestDate = new Date(request.date)
+    const requestDate = parseLocalDateString(request.date)
     return requestDate.getMonth() === newMonth && requestDate.getFullYear() === selectedYear.value
   })
   
@@ -540,7 +540,7 @@ watch(selectedYear, (newYear, oldYear) => {
 
   // Check if we already have data for this year
   const hasDataForYear = reimbursementRequests.value.some(request => {
-    const requestDate = new Date(request.date)
+    const requestDate = parseLocalDateString(request.date)
     return requestDate.getFullYear() === newYear
   })
 
@@ -1070,8 +1070,8 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
       const summaryGroup = summaryJobGroups.get(jobNumber)
 
       summaryGroup.requests.sort((a, b) => {
-        const aDate = new Date(a.request.date).getTime()
-        const bDate = new Date(b.request.date).getTime()
+        const aDate = parseLocalDateString(a.request.date).getTime()
+        const bDate = parseLocalDateString(b.request.date).getTime()
         return aDate - bDate
       })
 

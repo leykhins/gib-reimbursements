@@ -339,6 +339,13 @@
     return getLiveOutWeeklyCappedNights(expense)
   }
 
+  const buildLiveOutDescription = (expense: any): string => {
+    const start = expense.liveOutStartDate ? format(expense.liveOutStartDate.toDate(getLocalTimeZone()), 'PPP') : ''
+    const end = expense.liveOutEndDate ? format(expense.liveOutEndDate.toDate(getLocalTimeZone()), 'PPP') : ''
+    const nights = getCappedLiveOutNights(expense)
+    return `Live Out Allowance: ${nights} weekday night${nights === 1 ? '' : 's'} (${start} to ${end})`
+  }
+
   const updateLiveOutAmount = (expenseId: number) => {
     const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
     if (expenseIndex === -1) return
@@ -772,14 +779,12 @@
           });
         } else {
           // For non-mileage expenses, use the original logic
+          if (isLiveOutAllowanceCategory(expense)) {
+            // Always regenerate hidden live-out description from selected dates.
+            expense.description = buildLiveOutDescription(expense)
+          }
           if (categoryName.includes('meal') && !expense.description) {
             expense.description = 'Meal expense';
-          }
-          if (isLiveOutAllowanceCategory(expense) && !expense.description) {
-            const start = expense.liveOutStartDate ? df.format(expense.liveOutStartDate.toDate(getLocalTimeZone())) : ''
-            const end = expense.liveOutEndDate ? df.format(expense.liveOutEndDate.toDate(getLocalTimeZone())) : ''
-            const nights = getCappedLiveOutNights(expense)
-            expense.description = `Live Out Allowance: ${nights} weekday night${nights === 1 ? '' : 's'} (${start} to ${end})`
           }
           
           const isTravel = categoryName.includes('travel');
