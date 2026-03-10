@@ -407,6 +407,10 @@ const formatDate = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy')
 }
 
+const formatDateTime = (dateString) => {
+  return format(new Date(dateString), 'MMM d, yyyy h:mm a')
+}
+
 const formatStatus = (status) => {
   return status.split('_').map(word => 
     word.charAt(0).toUpperCase() + word.slice(1)
@@ -1140,6 +1144,7 @@ onMounted(async () => {
                               <TableRow class="bg-muted/50 hover:bg-muted/50">
                                 <TableHead class="w-[50px]"></TableHead>
                                 <TableHead class="uppercase">Date</TableHead>
+                                <TableHead class="uppercase">Submitted</TableHead>
                                 <TableHead class="uppercase">Description</TableHead>
                                 <TableHead class="uppercase">Amount</TableHead>
                                 <TableHead class="uppercase">Status</TableHead>
@@ -1165,6 +1170,7 @@ onMounted(async () => {
                                   />
                                 </TableCell>
                                 <TableCell class="py-2 text-sm">{{ formatDate(request.date) }}</TableCell>
+                                <TableCell class="py-2 text-sm">{{ formatDateTime(request.created_at) }}</TableCell>
                                 <TableCell class="py-2">
                                   <div class="text-sm">{{ request.description }}</div>
                                   <div v-if="request.subcategory_mapping?.subcategory?.subcategory_name" 

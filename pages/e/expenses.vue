@@ -282,6 +282,10 @@ const formatDate = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy')
 }
 
+const formatDateTime = (dateString) => {
+  return format(new Date(dateString), 'MMM d, yyyy h:mm a')
+}
+
 const formatStatus = (status) => {
   return status.split('_').map(word => 
     word.charAt(0).toUpperCase() + word.slice(1)
@@ -753,6 +757,7 @@ onMounted(async () => {
                       <TableHeader>
                         <TableRow class="bg-muted/50 hover:bg-muted/50">
                           <TableHead class="uppercase text-xs font-medium text-muted-foreground">Date</TableHead>
+                          <TableHead class="uppercase text-xs font-medium text-muted-foreground">Submitted</TableHead>
                           <TableHead class="uppercase text-xs font-medium text-muted-foreground">Description</TableHead>
                           <TableHead class="uppercase text-xs font-medium text-muted-foreground">Amount</TableHead>
                           <TableHead class="uppercase text-xs font-medium text-muted-foreground">Status</TableHead>
@@ -766,6 +771,7 @@ onMounted(async () => {
                           class="hover:bg-muted/50"
                         >
                           <TableCell class="py-2 text-sm">{{ formatDate(claim.date) }}</TableCell>
+                          <TableCell class="py-2 text-sm">{{ formatDateTime(claim.created_at) }}</TableCell>
                           <TableCell class="py-2">
                             <div class="text-sm">{{ claim.description }}</div>
                             <div v-if="claim.subcategory_mapping?.subcategory?.subcategory_name" 

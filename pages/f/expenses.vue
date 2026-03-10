@@ -346,6 +346,11 @@ const formatDate = (date) => {
   return df.format(parsedDate.toDate(getLocalTimeZone()))
 }
 
+const formatDateTime = (date) => {
+  if (!date) return ''
+  return format(new Date(date), 'MMM d, yyyy h:mm a')
+}
+
 // Update the organizedData computed property
 const organizedData = computed(() => {
   const organized = {}
@@ -2200,6 +2205,7 @@ const convertPdfToImage = async (receiptUrl: string): Promise<string | null> => 
                               <TableRow class="bg-muted/50 hover:bg-muted/50">
                                 <TableHead class="w-[50px]"></TableHead>
                                 <TableHead class="uppercase">Date</TableHead>
+                                <TableHead class="uppercase">Submitted</TableHead>
                                 <TableHead class="uppercase">Description</TableHead>
                                 <TableHead class="uppercase">Amount</TableHead>
                                 <TableHead class="uppercase">Status</TableHead>
@@ -2235,6 +2241,7 @@ const convertPdfToImage = async (receiptUrl: string): Promise<string | null> => 
                                   />
                                 </TableCell>
                                 <TableCell class="py-2 text-sm">{{ formatDate(request.date) }}</TableCell>
+                                <TableCell class="py-2 text-sm">{{ formatDateTime(request.created_at) }}</TableCell>
                                 <TableCell class="py-2">
                                   <div class="text-sm">{{ request.description }}</div>
                                   <div v-if="request.subcategory_mapping?.subcategory?.subcategory_name" 
