@@ -1284,8 +1284,20 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
             // Build description content with embedded receipts
             const descriptionContent = []
 
-            // Add text content
-            descriptionContent.push({ text: request.description, fontSize: 9 })
+            const descText = (request.description ?? '').trim()
+            const isMealsCategory = (category.name || '').toLowerCase().includes('meal')
+            // Meals: label the user-provided description so it is explicit on the PDF
+            if (isMealsCategory) {
+              descriptionContent.push({
+                text: [
+                  { text: 'Expense description: ', bold: true },
+                  descText || '—'
+                ],
+                fontSize: 9
+              })
+            } else {
+              descriptionContent.push({ text: descText, fontSize: 9 })
+            }
 
             if (request.related_employee) {
               descriptionContent.push({ text: `\nEmployee: ${request.related_employee}`, fontSize: 8, color: '#666' })
