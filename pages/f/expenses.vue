@@ -947,6 +947,7 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
     const monthName = months[selectedMonth.value]
     const yearStr = String(selectedYear.value)
 
+    /* PDF summary section (no receipts) — disabled; detail-only export
     // Build summary data grouped by job number (no receipts)
     const summaryJobGroups = new Map()
     let summaryOverallTotal = 0
@@ -1186,6 +1187,7 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
         }
       ]
     })
+    */
 
     // Create detailed document content array (with receipts)
     const detailContent = [
@@ -1498,11 +1500,7 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
 
     // Create document definition
     const docDefinition = {
-      content: [
-        ...detailContent,
-        { text: '', pageBreak: 'after' },
-        ...summaryContent
-      ],
+      content: [...detailContent],
       styles: {
         header: {
           fontSize: 14,
