@@ -31,6 +31,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { getReceiptSignedUrl } from '~/lib/utils'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import RejectedClaims from '@/components/RejectedClaims.vue'
 
 definePageMeta({
   layout: 'employee',
@@ -158,10 +159,13 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
       .from('claims')
       .select(`
         *,
-        category:category_id(id, category_name),
-        subcategory_mapping:subcategory_mapping_id(
+        claim_categories:category_id(id, category_name, requires_license_number),
+        category_subcategory_mapping:subcategory_mapping_id(
           id,
-          subcategory:subcategory_id(id, subcategory_name)
+          requires_job_number,
+          requires_employee_name,
+          requires_client_info,
+          claim_subcategories:subcategory_id(id, subcategory_name)
         )
       `)
       .eq('employee_id', user.value.id)
@@ -216,7 +220,7 @@ const organizedData = computed(() => {
   
   filteredRequests.value.forEach(claim => {
     const categoryId = claim.category_id
-    const categoryName = claim.category?.category_name || 'Uncategorized'
+    const categoryName = claim.claim_categories?.category_name || 'Uncategorized'
     const jobNumber = claim.job_number || 'No Job Number'
     
     if (!organized[categoryId]) {
@@ -630,6 +634,15 @@ onMounted(async () => {
     <!-- Border under months -->
     <div class="h-px w-full bg-border"></div>
 
+    <!-- Rejected Claims requiring attention -->
+    <RejectedClaims
+      v-if="reimbursementRequests.some(r => r.status === 'rejected')"
+      :claims="reimbursementRequests"
+      :categories="categories"
+      :loading="loading"
+      @refresh-claims="fetchReimbursementRequests"
+    />
+
     <!-- Expenses List -->
     <div>
       <div v-if="loading" class="space-y-4">
@@ -791,9 +804,9 @@ onMounted(async () => {
                           </TableCell>
                           <TableCell class="py-2">
                             <div class="text-sm">{{ claim.description }}</div>
-                            <div v-if="claim.subcategory_mapping?.subcategory?.subcategory_name" 
+                            <div v-if="claim.category_subcategory_mapping?.claim_subcategories?.subcategory_name" 
                                  class="text-xs text-muted-foreground mt-1">
-                              {{ claim.subcategory_mapping.subcategory.subcategory_name }}
+                              {{ claim.category_subcategory_mapping.claim_subcategories.subcategory_name }}
                             </div>
                           </TableCell>
                           <TableCell class="py-2">
