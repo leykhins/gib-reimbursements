@@ -6,7 +6,7 @@
   import { Label } from '@/components/ui/label'
   import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
   import { Calendar } from '@/components/ui/calendar'
-  import { CalendarIcon, Eye, Edit, RefreshCw, AlertCircle, Check, X, LoaderCircle, XCircle } from 'lucide-vue-next'
+  import { CalendarIcon, Eye, Edit, RefreshCw, AlertCircle, Check, X, LoaderCircle, XCircle, Trash2 } from 'lucide-vue-next'
   import { useRouter } from 'vue-router'
   import { format } from 'date-fns'
   import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -41,6 +41,12 @@
   const client = useSupabaseClient()
   const user = useSupabaseUser()
   const { toast } = useToast()
+  const config = useRuntimeConfig()
+  const GOOGLE_MAPS_API_KEY = config.public.googleMapsApiKey || ''
+
+  // Google Maps
+  let distanceMatrixService: any = null
+  const isGoogleMapsLoaded = ref(false)
 
   // State management
   const error = ref('')
@@ -55,8 +61,11 @@
   // UI state
   const showViewModal = ref(false)
   const showEditModal = ref(false)
+  const showDeleteConfirm = ref(false)
   const selectedClaim = ref<any>(null)
   const editingClaim = ref<any>(null)
+  const deletingClaim = ref<any>(null)
+  const deleteLoading = ref(false)
   const showReceiptViewer = ref(false)
 
   // Filters
@@ -150,19 +159,29 @@
     }
   }
 
+  // User mileage rate
+  const userMileageRate = ref(0.61)
+
+  const fetchUserMileageRate = async () => {
+    if (!user.value) return
+    try {
+      const { data } = await client.from('users').select('mileage_rate').eq('id', user.value.id).single()
+      const row = data as { mileage_rate?: number } | null
+      if (row?.mileage_rate) userMileageRate.value = row.mileage_rate
+    } catch {}
+  }
+
   // Computed property to get subcategories for selected category
   const getSubcategories = computed(() => (categoryId: string) => {
     if (!categoryId) return []
     return dbSubcategories.value.filter(sc => sc.category_id === categoryId)
   })
 
-  // Show field based on category and subcategory requirements
+  // Show field based on category and subcategory requirements (for view modal — uses raw claim object)
   const showField = computed(() => (fieldName: string, claim: any) => {
     if (!claim.claim_categories || !claim.category_subcategory_mapping) return false
-    
     const categoryName = claim.claim_categories.category_name.toLowerCase()
     const subcategory = claim.category_subcategory_mapping.claim_subcategories
-    
     switch (fieldName) {
       case 'jobNumber':
         return claim.category_subcategory_mapping.requires_job_number === true || 
@@ -177,12 +196,141 @@
       case 'companyName':
         return claim.category_subcategory_mapping.requires_client_info === true || 
               subcategory.subcategory_name.toLowerCase().includes('business development')
-      case 'travel':
-        return categoryName.includes('travel') || categoryName.includes('mileage')
       default:
         return false
     }
   })
+
+  // Show field reactive to edit form values (for edit modal)
+  const showEditField = computed(() => (fieldName: string) => {
+    const category = dbCategories.value.find(c => c.id === editForm.value.categoryId)
+    if (!category) return false
+    const categoryName = category.name.toLowerCase()
+    const sub = dbSubcategories.value.find(sc => sc.mapping_id === editForm.value.subcategoryMappingId)
+
+    switch (fieldName) {
+      case 'jobNumber':
+        if (categoryName.includes('mileage')) return false
+        if (!sub) return false
+        return sub.requires_job_number === true ||
+               sub.name.toLowerCase().includes('jobsite') ||
+               sub.name.toLowerCase().includes('tender')
+      case 'licenseNumber':
+        return categoryName.includes('vehicle') || !!category.requires_license_number
+      case 'relatedEmployee':
+        if (!sub) return false
+        return sub.requires_employee_name === true || sub.name.toLowerCase().includes('employee')
+      case 'clientName':
+      case 'companyName':
+        if (!sub) return false
+        return sub.requires_client_info === true || sub.name.toLowerCase().includes('business development')
+      default:
+        return false
+    }
+  })
+
+  // Check if the currently editing claim is a meals category
+  const isEditingMealsCategory = computed(() => {
+    const cat = dbCategories.value.find(c => c.id === editForm.value.categoryId)
+    return !!cat && cat.name.toLowerCase().includes('meal')
+  })
+
+  // Check if the currently editing claim is a mileage category
+  const isEditingMileageCategory = computed(() => {
+    const cat = dbCategories.value.find(c => c.id === editForm.value.categoryId)
+    return !!cat && cat.name.toLowerCase().includes('mileage')
+  })
+
+  const isVancouverLocation = (start: string, dest: string) => {
+    const s = start?.toLowerCase() || ''
+    const d = dest?.toLowerCase() || ''
+    return s.includes('vancouver') || d.includes('vancouver')
+  }
+
+  const recalculateMileageAmount = () => {
+    const dist = parseFloat(editForm.value.distance)
+    if (isNaN(dist) || dist <= 0) return
+    let amount = dist * userMileageRate.value
+    if (isVancouverLocation(editForm.value.startLocation, editForm.value.destination)) {
+      amount *= 1.02
+    }
+    editForm.value.amount = amount.toFixed(2)
+  }
+
+  const truncateAddress = (address: string) => {
+    if (!address) return ''
+    const commaIndex = address.indexOf(',')
+    return commaIndex > 0 ? address.substring(0, commaIndex) : address
+  }
+
+  // Setup Google Places Autocomplete for the edit modal travel inputs
+  const setupEditAutocomplete = () => {
+    nextTick(() => {
+      if (!window.google?.maps?.places) return
+      try {
+        const options = { types: ['address'], componentRestrictions: { country: 'ca' } }
+
+        const startInput = document.getElementById('edit-start-location') as HTMLInputElement
+        const endInput = document.getElementById('edit-destination') as HTMLInputElement
+
+        if (startInput && !startInput.getAttribute('data-autocomplete-initialized')) {
+          const autoStart = new window.google.maps.places.Autocomplete(startInput, options)
+          startInput.setAttribute('data-autocomplete-initialized', 'true')
+          autoStart.addListener('place_changed', () => {
+            const place = autoStart.getPlace()
+            if (place?.formatted_address) {
+              editForm.value.startLocation = place.formatted_address
+              calculateEditDistance()
+            }
+          })
+        }
+
+        if (endInput && !endInput.getAttribute('data-autocomplete-initialized')) {
+          const autoEnd = new window.google.maps.places.Autocomplete(endInput, options)
+          endInput.setAttribute('data-autocomplete-initialized', 'true')
+          autoEnd.addListener('place_changed', () => {
+            const place = autoEnd.getPlace()
+            if (place?.formatted_address) {
+              editForm.value.destination = place.formatted_address
+              calculateEditDistance()
+            }
+          })
+        }
+      } catch (e) {
+        console.error('Error setting up edit autocomplete:', e)
+      }
+    })
+  }
+
+  const calculateEditDistance = () => {
+    if (!distanceMatrixService) return
+    const { startLocation, destination } = editForm.value
+    if (!startLocation || !destination) return
+
+    const request = {
+      origins: [startLocation],
+      destinations: [destination],
+      travelMode: 'DRIVING',
+      unitSystem: window.google.maps.UnitSystem.METRIC
+    }
+
+    distanceMatrixService.getDistanceMatrix(request, (response: any, status: string) => {
+      if (status === 'OK') {
+        const result = response.rows[0].elements[0]
+        if (result.status === 'OK') {
+          editForm.value.distance = (result.distance.value / 1000).toFixed(2)
+          recalculateMileageAmount()
+        }
+      }
+    })
+  }
+
+  const initEditGoogleMaps = () => {
+    if (window.google?.maps) {
+      isGoogleMapsLoaded.value = true
+      distanceMatrixService = new window.google.maps.DistanceMatrixService()
+    }
+  }
 
   // Filter claims
   const applyFilters = () => {
@@ -238,6 +386,29 @@
     }
     
     showEditModal.value = true
+
+    if (isEditingMileageCategory.value) {
+      nextTick(() => {
+        if (isGoogleMapsLoaded.value) {
+          setupEditAutocomplete()
+          // If locations are already populated, calculate distance immediately
+          if (editForm.value.startLocation && editForm.value.destination) {
+            calculateEditDistance()
+          }
+        } else {
+          // Maps not loaded yet — poll until ready then calculate
+          const poll = setInterval(() => {
+            if (isGoogleMapsLoaded.value) {
+              clearInterval(poll)
+              setupEditAutocomplete()
+              if (editForm.value.startLocation && editForm.value.destination) {
+                calculateEditDistance()
+              }
+            }
+          }, 200)
+        }
+      })
+    }
   }
 
   // Validate edit form
@@ -245,7 +416,7 @@
     editFormErrors.value = {}
     let isValid = true
     
-    if (!editForm.value.description.trim()) {
+    if (isEditingMealsCategory.value && !editForm.value.description.trim()) {
       editFormErrors.value.description = 'Description is required'
       isValid = false
     }
@@ -282,40 +453,52 @@
     }
     
     try {
-      const { error: updateError } = await client
-        .from('claims')
-        .update({
-          description: editForm.value.description,
-          amount: parseFloat(editForm.value.amount),
-          gst_amount: parseFloat(editForm.value.gst_amount) || 0,
-          pst_amount: parseFloat(editForm.value.pst_amount) || 0,
-          date: editForm.value.date.toDate(getLocalTimeZone()).toISOString(),
-          category_id: editForm.value.categoryId,
-          subcategory_mapping_id: editForm.value.subcategoryMappingId,
-          job_number: editForm.value.jobNumber || null,
-          license_number: editForm.value.licenseNumber || null,
-          related_employee: editForm.value.relatedEmployee || null,
-          client_name: editForm.value.clientName || null,
-          company_name: editForm.value.companyName || null,
-          start_location: editForm.value.startLocation || null,
-          destination: editForm.value.destination || null,
-          travel_distance: editForm.value.distance ? parseFloat(editForm.value.distance) : null,
-          status: 'pending', // Reset to pending for re-review
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', editingClaim.value.id)
-      
-      if (updateError) throw updateError
-      
+      let description = editForm.value.description
+      if (isEditingMileageCategory.value) {
+        const shortStart = truncateAddress(editForm.value.startLocation)
+        const shortEnd = truncateAddress(editForm.value.destination)
+        description = `Mileage: ${shortStart} to ${shortEnd}`
+      }
+
+      const { data: { session } } = await client.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+
+      const res = await $fetch('/api/claims/resubmit', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: {
+          claimId: editingClaim.value.id,
+          updates: {
+            description,
+            amount: parseFloat(editForm.value.amount),
+            gst_amount: parseFloat(editForm.value.gst_amount) || 0,
+            pst_amount: parseFloat(editForm.value.pst_amount) || 0,
+            date: editForm.value.date.toDate(getLocalTimeZone()).toISOString(),
+            category_id: editForm.value.categoryId,
+            subcategory_mapping_id: editForm.value.subcategoryMappingId,
+            job_number: editForm.value.jobNumber || null,
+            license_number: editForm.value.licenseNumber || null,
+            related_employee: editForm.value.relatedEmployee || null,
+            client_name: editForm.value.clientName || null,
+            company_name: editForm.value.companyName || null,
+            start_location: editForm.value.startLocation || null,
+            destination: editForm.value.destination || null,
+            travel_distance: editForm.value.distance ? parseFloat(editForm.value.distance) : null,
+          }
+        }
+      })
+
+      if (!res.success) throw new Error('Resubmit failed')
+
       toast({
         title: 'Success',
         description: 'Claim has been updated and resubmitted for review',
         variant: 'default'
       })
-      
+
       showEditModal.value = false
       emit('refresh-claims')
-      
+
     } catch (err) {
       console.error('Error updating claim:', err)
       toast({
@@ -331,6 +514,62 @@
     showEditModal.value = false
     editingClaim.value = null
     editFormErrors.value = {}
+  }
+
+  // Open delete confirmation
+  const confirmDeleteClaim = (claim: any) => {
+    deletingClaim.value = claim
+    showDeleteConfirm.value = true
+  }
+
+  // Delete claim
+  const deleteClaim = async () => {
+    if (!deletingClaim.value) return
+    deleteLoading.value = true
+
+    try {
+      const claim = deletingClaim.value
+
+      // Get the user's session token for the server endpoint
+      const { data: { session } } = await client.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+
+      // Use server endpoint to bypass RLS (service role on server, ownership verified server-side)
+      const res = await $fetch('/api/claims/delete', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: { claimId: claim.id }
+      })
+
+      if (!res.success) throw new Error('Delete failed')
+
+      // Clean up receipt files from storage after confirmed DB deletion
+      if (claim.receipt_url) {
+        await client.storage.from('receipts').remove([claim.receipt_url]).catch(() => {})
+      }
+      if (claim.receipt_url_2) {
+        await client.storage.from('receipts').remove([claim.receipt_url_2]).catch(() => {})
+      }
+
+      toast({
+        title: 'Claim Deleted',
+        description: 'The rejected claim has been deleted.',
+        variant: 'default'
+      })
+
+      showDeleteConfirm.value = false
+      deletingClaim.value = null
+      emit('refresh-claims')
+    } catch (err) {
+      console.error('Error deleting claim:', err)
+      toast({
+        title: 'Error',
+        description: 'Failed to delete claim. Please try again.',
+        variant: 'destructive'
+      })
+    } finally {
+      deleteLoading.value = false
+    }
   }
 
   // Format currency
@@ -356,9 +595,47 @@
     }
   }
 
+  // Watch edit modal open to setup autocomplete for mileage claims
+  watch(showEditModal, (isOpen) => {
+    if (isOpen && isEditingMileageCategory.value) {
+      if (isGoogleMapsLoaded.value) {
+        setupEditAutocomplete()
+      }
+    }
+  })
+
+  // Watch category change within edit modal - re-init autocomplete when switching to mileage
+  watch(() => editForm.value.categoryId, () => {
+    if (showEditModal.value && isEditingMileageCategory.value) {
+      nextTick(() => setupEditAutocomplete())
+    }
+  })
+
   // Initialize component
   onMounted(async () => {
-    await fetchCategories()
+    await Promise.all([fetchCategories(), fetchUserMileageRate()])
+
+    if (window.google) {
+      initEditGoogleMaps()
+    } else if (GOOGLE_MAPS_API_KEY) {
+      // Only inject the script if not already present
+      if (!document.querySelector('script[src*="maps.googleapis.com"]')) {
+        const script = document.createElement('script')
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
+        script.async = true
+        script.defer = true
+        script.onload = initEditGoogleMaps
+        document.head.appendChild(script)
+      } else {
+        // Script tag exists but may not have fired onload yet — poll briefly
+        const poll = setInterval(() => {
+          if (window.google?.maps) {
+            clearInterval(poll)
+            initEditGoogleMaps()
+          }
+        }, 200)
+      }
+    }
   })
 
   const viewReceipt = (claim: any) => {
@@ -384,7 +661,7 @@
         <!-- Claims list -->
         <div class="space-y-3 max-h-96 overflow-y-auto">
           <div v-for="claim in filteredClaims" :key="claim.id" class="border border-red-200 rounded-md p-3 hover:shadow-sm transition-shadow">
-            <div class="flex items-start justify-between">
+            <div class="flex items-start justify-between mb-2">
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 mb-2">
                   <div class="col-span-2">
@@ -413,20 +690,23 @@
                   <Edit class="h-3 w-3 mr-1" />
                   Revise
                 </Button>
+                <Button size="sm" variant="destructive" @click="confirmDeleteClaim(claim)" class="h-7 px-2 text-xs">
+                  <Trash2 class="h-3 w-3" />
+                </Button>
               </div>
             </div>
             <div class="grid grid-cols-2 gap-2 text-xs text-gray-600 mb-2">
-              <div>
-                <span class="font-medium">Amount:</span> {{ formatCurrency(claim.amount) }}
-              </div>
-              <div>
-                <span class="font-medium">Date:</span> {{ formatDate(claim.date) }}
-              </div>
               <div v-if="claim.job_number" class="col-span-2">
                 <span class="font-medium">Job #:</span> {{ claim.job_number }}
               </div>
               <div v-if="claim.license_number" class="col-span-2">
                 <span class="font-medium">License:</span> {{ claim.license_number }}
+              </div>              
+              <div>
+                <span class="font-medium">Amount:</span> {{ formatCurrency(claim.amount) }}
+              </div>
+              <div>
+                <span class="font-medium">Date:</span> {{ formatDate(claim.date) }}
               </div>
             </div>
             
@@ -535,18 +815,72 @@
 
     <!-- Edit Modal -->
     <Dialog v-model:open="showEditModal">
-      <DialogContent class="max-w-4xl">
+      <DialogContent class="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Revise Claim</DialogTitle>
           <DialogDescription>
             Update the claim details and resubmit for review.
           </DialogDescription>
         </DialogHeader>
-        
-        <div class="space-y-6">
-          <!-- Description -->
-          <div class="space-y-2">
-            <Label for="edit-description" class="flex items-center">
+
+        <div class="space-y-4">
+
+          <!-- 1. Category + Subcategory (subcategory hidden for mileage) -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <Label class="flex items-center">
+                Expense Category <span class="text-red-500 ml-1">*</span>
+              </Label>
+              <Select v-model="editForm.categoryId">
+                <SelectTrigger :class="{ 'border-red-500': editFormErrors.categoryId }">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="cat in dbCategories" :key="cat.id" :value="cat.id">
+                    {{ cat.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p v-if="editFormErrors.categoryId" class="text-sm text-red-500">{{ editFormErrors.categoryId }}</p>
+            </div>
+
+            <div v-if="!isEditingMileageCategory" class="space-y-2">
+              <Label class="flex items-center">
+                Subcategory <span class="text-red-500 ml-1">*</span>
+              </Label>
+              <Select v-model="editForm.subcategoryMappingId" :disabled="!editForm.categoryId">
+                <SelectTrigger :class="{ 'border-red-500': editFormErrors.subcategoryMappingId }">
+                  <SelectValue placeholder="Select subcategory" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="sub in getSubcategories(editForm.categoryId)"
+                    :key="sub.id"
+                    :value="sub.mapping_id"
+                  >
+                    {{ sub.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p v-if="editFormErrors.subcategoryMappingId" class="text-sm text-red-500">{{ editFormErrors.subcategoryMappingId }}</p>
+            </div>
+          </div>
+
+          <!-- 2. Client Name + Company Name -->
+          <div v-if="showEditField('clientName') || showEditField('companyName')" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div v-if="showEditField('clientName')" class="space-y-2">
+              <Label class="flex items-center">Client Name <span class="text-red-500 ml-1">*</span></Label>
+              <Input v-model="editForm.clientName" placeholder="Enter client name" />
+            </div>
+            <div v-if="showEditField('companyName')" class="space-y-2">
+              <Label class="flex items-center">Company Name <span class="text-red-500 ml-1">*</span></Label>
+              <Input v-model="editForm.companyName" placeholder="Enter company name" />
+            </div>
+          </div>
+
+          <!-- 3. Description (meals only) -->
+          <div v-if="isEditingMealsCategory" class="space-y-2">
+            <Label class="flex items-center">
               Description <span class="text-red-500 ml-1">*</span>
             </Label>
             <Input
@@ -555,215 +889,160 @@
               placeholder="Enter description"
               :class="{ 'border-red-500': editFormErrors.description }"
             />
-            <p v-if="editFormErrors.description" class="text-sm text-red-500">
-              {{ editFormErrors.description }}
-            </p>
+            <p v-if="editFormErrors.description" class="text-sm text-red-500">{{ editFormErrors.description }}</p>
           </div>
-          
-          <!-- Category and Subcategory -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="space-y-2">
-              <Label for="edit-category" class="flex items-center">
-                Category <span class="text-red-500 ml-1">*</span>
-              </Label>
-              <Select v-model="editForm.categoryId">
-                <SelectTrigger :class="{ 'border-red-500': editFormErrors.categoryId }">
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem 
-                    v-for="category in dbCategories" 
-                    :key="category.id" 
-                    :value="category.id"
-                  >
-                    {{ category.name }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <p v-if="editFormErrors.categoryId" class="text-sm text-red-500">
-                {{ editFormErrors.categoryId }}
-              </p>
-            </div>
-            
-            <div class="space-y-2">
-              <Label for="edit-subcategory" class="flex items-center">
-                Subcategory <span class="text-red-500 ml-1">*</span>
-              </Label>
-              <Select v-model="editForm.subcategoryMappingId">
-                <SelectTrigger :class="{ 'border-red-500': editFormErrors.subcategoryMappingId }">
-                  <SelectValue placeholder="Select subcategory" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem 
-                    v-for="subcategory in getSubcategories(editForm.categoryId)" 
-                    :key="subcategory.id" 
-                    :value="subcategory.mapping_id"
-                  >
-                    {{ subcategory.name }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <p v-if="editFormErrors.subcategoryMappingId" class="text-sm text-red-500">
-                {{ editFormErrors.subcategoryMappingId }}
-              </p>
-            </div>
-          </div>
-          
-          <!-- Amount and Tax -->
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div class="space-y-2">
-              <Label for="edit-amount" class="flex items-center">
-                Amount <span class="text-red-500 ml-1">*</span>
-              </Label>
-              <Input
-                id="edit-amount"
-                v-model="editForm.amount"
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-                :class="{ 'border-red-500': editFormErrors.amount }"
-              />
-              <p v-if="editFormErrors.amount" class="text-sm text-red-500">
-                {{ editFormErrors.amount }}
-              </p>
-            </div>
-            
-            <div class="space-y-2">
-              <Label for="edit-gst">GST Amount</Label>
-              <Input
-                id="edit-gst"
-                v-model="editForm.gst_amount"
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-              />
-            </div>
-            
-            <div class="space-y-2">
-              <Label for="edit-pst">PST Amount</Label>
-              <Input
-                id="edit-pst"
-                v-model="editForm.pst_amount"
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-              />
-            </div>
-          </div>
-          
-          <!-- Date -->
-          <div class="space-y-2">
-            <Label for="edit-date" class="flex items-center">
-              Date <span class="text-red-500 ml-1">*</span>
+
+          <!-- 4. Date (hidden for mileage — date is per mileage entry below) -->
+          <div v-if="!isEditingMileageCategory" class="space-y-2">
+            <Label class="flex items-center">
+              Date of Expense <span class="text-red-500 ml-1">*</span>
             </Label>
             <Popover>
               <PopoverTrigger as-child>
                 <Button
                   variant="outline"
-                  :class="cn(
-                    'w-full justify-start text-left font-normal',
-                    !editForm.date && 'text-muted-foreground',
-                  )"
+                  :class="cn('w-full justify-start text-left font-normal', !editForm.date && 'text-muted-foreground')"
                 >
                   <CalendarIcon class="mr-2 h-4 w-4" />
                   {{ editForm.date ? df.format(editForm.date.toDate(getLocalTimeZone())) : "Pick a date" }}
                 </Button>
               </PopoverTrigger>
               <PopoverContent class="w-auto p-0">
-                <Calendar 
-                  v-model="editForm.date"
-                  :max-value="today(getLocalTimeZone())" 
-                  initial-focus 
-                />
+                <Calendar v-model="editForm.date" :max-value="today(getLocalTimeZone())" initial-focus />
               </PopoverContent>
             </Popover>
           </div>
-          
-          <!-- Additional Fields -->
-          <div v-if="editingClaim" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div v-if="showField('jobNumber', editingClaim)" class="space-y-2">
-              <Label for="edit-job-number">Job Number</Label>
-              <Input
-                id="edit-job-number"
-                v-model="editForm.jobNumber"
-                placeholder="Enter job number"
-              />
+
+          <!-- 5. Job Number / License Number / Related Employee -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div v-if="showEditField('jobNumber')" class="space-y-2">
+              <Label class="flex items-center">Job Number <span class="text-red-500 ml-1">*</span></Label>
+              <Input v-model="editForm.jobNumber" placeholder="Enter job number" type="number" />
             </div>
-            
-            <div v-if="showField('licenseNumber', editingClaim)" class="space-y-2">
-              <Label for="edit-license">License Number</Label>
-              <Input
-                id="edit-license"
-                v-model="editForm.licenseNumber"
-                placeholder="Enter license number"
-              />
+            <div v-if="showEditField('licenseNumber')" class="space-y-2">
+              <Label class="flex items-center">License Number <span class="text-red-500 ml-1">*</span></Label>
+              <Input v-model="editForm.licenseNumber" placeholder="Enter license number" />
             </div>
-            
-            <div v-if="showField('relatedEmployee', editingClaim)" class="space-y-2">
-              <Label for="edit-employee">Related Employee</Label>
-              <Input
-                id="edit-employee"
-                v-model="editForm.relatedEmployee"
-                placeholder="Enter employee name"
-              />
-            </div>
-            
-            <div v-if="showField('clientName', editingClaim)" class="space-y-2">
-              <Label for="edit-client">Client Name</Label>
-              <Input
-                id="edit-client"
-                v-model="editForm.clientName"
-                placeholder="Enter client name"
-              />
-            </div>
-            
-            <div v-if="showField('companyName', editingClaim)" class="space-y-2">
-              <Label for="edit-company">Company Name</Label>
-              <Input
-                id="edit-company"
-                v-model="editForm.companyName"
-                placeholder="Enter company name"
-              />
+            <div v-if="showEditField('relatedEmployee')" class="space-y-2">
+              <Label class="flex items-center">Employee Name <span class="text-red-500 ml-1">*</span></Label>
+              <Input v-model="editForm.relatedEmployee" placeholder="Enter employee name" />
             </div>
           </div>
-          
-          <!-- Travel Fields -->
-          <div v-if="editingClaim && showField('travel', editingClaim)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          <!-- 6. Amount / GST / PST (hidden for mileage — amount is auto-calculated) -->
+          <div v-if="!isEditingMileageCategory" class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div class="space-y-2">
-              <Label for="edit-start">Start Location</Label>
+              <Label class="flex items-center">
+                Total Amount (Including Tax) <span class="text-red-500 ml-1">*</span>
+              </Label>
               <Input
-                id="edit-start"
-                v-model="editForm.startLocation"
-                placeholder="Enter start location"
-              />
-            </div>
-            
-            <div class="space-y-2">
-              <Label for="edit-destination">Destination</Label>
-              <Input
-                id="edit-destination"
-                v-model="editForm.destination"
-                placeholder="Enter destination"
-              />
-            </div>
-            
-            <div class="space-y-2">
-              <Label for="edit-distance">Distance (km)</Label>
-              <Input
-                id="edit-distance"
-                v-model="editForm.distance"
+                v-model="editForm.amount"
                 type="number"
                 step="0.01"
                 placeholder="0.00"
+                :class="{ 'border-red-500': editFormErrors.amount }"
               />
+              <p v-if="editFormErrors.amount" class="text-sm text-red-500">{{ editFormErrors.amount }}</p>
+            </div>
+            <div class="space-y-2">
+              <Label>GST Amount ($)</Label>
+              <Input v-model="editForm.gst_amount" type="number" step="0.01" placeholder="0.00" />
+            </div>
+            <div class="space-y-2">
+              <Label>PST Amount ($)</Label>
+              <Input v-model="editForm.pst_amount" type="number" step="0.01" placeholder="0.00" />
             </div>
           </div>
+
+          <!-- 7. Mileage section -->
+          <div v-if="isEditingMileageCategory" class="space-y-4">
+            <!-- Commuting note -->
+            <div class="bg-blue-50 border border-blue-200 rounded-md p-3">
+              <p class="text-sm text-blue-800">
+                <strong>Note:</strong> Commuting is not a reimbursable expense. This includes travel from your home to the office, a job site, or a client's premises.
+              </p>
+            </div>
+
+            <!-- Mileage fields -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <!-- Date for mileage entry -->
+              <div class="space-y-2">
+                <Label class="flex items-center">Date <span class="text-red-500 ml-1">*</span></Label>
+                <Popover>
+                  <PopoverTrigger as-child>
+                    <Button
+                      variant="outline"
+                      :class="cn('w-full justify-start text-left font-normal', !editForm.date && 'text-muted-foreground')"
+                    >
+                      <CalendarIcon class="mr-2 h-4 w-4" />
+                      {{ editForm.date ? df.format(editForm.date.toDate(getLocalTimeZone())) : "Pick a date" }}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent class="w-auto p-0">
+                    <Calendar v-model="editForm.date" :max-value="today(getLocalTimeZone())" initial-focus />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <!-- Subcategory for mileage -->
+              <div class="space-y-2">
+                <Label class="flex items-center">Subcategory <span class="text-red-500 ml-1">*</span></Label>
+                <Select v-model="editForm.subcategoryMappingId" :disabled="!editForm.categoryId">
+                  <SelectTrigger :class="{ 'border-red-500': editFormErrors.subcategoryMappingId }">
+                    <SelectValue placeholder="Select subcategory" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="sub in getSubcategories(editForm.categoryId)"
+                      :key="sub.id"
+                      :value="sub.mapping_id"
+                    >
+                      {{ sub.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <!-- Start Location -->
+              <div class="space-y-2">
+                <Label class="flex items-center">Start Address <span class="text-red-500 ml-1">*</span></Label>
+                <Input
+                  id="edit-start-location"
+                  v-model="editForm.startLocation"
+                  placeholder="Start address"
+                  autocomplete="off"
+                />
+              </div>
+
+              <!-- Destination -->
+              <div class="space-y-2">
+                <Label class="flex items-center">Destination <span class="text-red-500 ml-1">*</span></Label>
+                <Input
+                  id="edit-destination"
+                  v-model="editForm.destination"
+                  placeholder="Destination"
+                  autocomplete="off"
+                />
+              </div>
+            </div>
+
+            <!-- Distance + Amount read-only summary -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-md">
+              <div class="space-y-2">
+                <Label class="font-semibold">Distance (km)</Label>
+                <Input :value="editForm.distance || ''" readonly class="bg-gray-100 font-bold" placeholder="Auto-calculated" />
+              </div>
+              <div class="space-y-2">
+                <Label class="font-semibold">Total Amount ($)</Label>
+                <Input :value="editForm.amount || ''" readonly class="bg-gray-100 font-bold" placeholder="Auto-calculated" />
+              </div>
+            </div>
+          </div>
+
         </div>
-        
+
         <div class="flex justify-end gap-2 pt-4">
-          <Button variant="outline" @click="cancelEdit">
-            Cancel
-          </Button>
+          <Button variant="outline" @click="cancelEdit">Cancel</Button>
           <Button @click="submitEdit" :disabled="loading">
             <LoaderCircle v-if="loading" class="h-4 w-4 mr-2 animate-spin" />
             <RefreshCw v-else class="h-4 w-4 mr-2" />
@@ -780,6 +1059,33 @@
       :url2="selectedClaim?.receipt_url_2"
       title="Claim Receipts"
     />
+
+    <!-- Delete Confirmation Dialog -->
+    <Dialog v-model:open="showDeleteConfirm">
+      <DialogContent class="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete Claim</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete this rejected claim? This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <div v-if="deletingClaim" class="py-2 text-sm text-muted-foreground space-y-1">
+          <p><span class="font-medium text-foreground">{{ deletingClaim.claim_categories?.category_name }}</span> — {{ deletingClaim.category_subcategory_mapping?.claim_subcategories?.subcategory_name }}</p>
+          <p>{{ formatCurrency(deletingClaim.amount) }} · {{ formatDate(deletingClaim.date) }}</p>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <Button variant="outline" @click="showDeleteConfirm = false" :disabled="deleteLoading">
+            Cancel
+          </Button>
+          <Button variant="destructive" @click="deleteClaim" :disabled="deleteLoading">
+            <LoaderCircle v-if="deleteLoading" class="h-4 w-4 mr-2 animate-spin" />
+            <Trash2 v-else class="h-4 w-4 mr-2" />
+            Delete
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
     <Toaster />
   </div>
 </template>
