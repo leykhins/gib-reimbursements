@@ -81,6 +81,7 @@ const successMessage = ref('')
 // Add these after other refs (around line 69)
 const showRejectModal = ref(false)
 const rejectingRequestId = ref(null)
+const rejectingRequests = ref<string[]>([])
 const rejectionReason = ref('')
 
 // Add these new refs for tracking different loading states
@@ -695,7 +696,18 @@ const confirmVerification = async () => {
 
 // Replace the existing rejectRequest function with this implementation (around line 490)
 const rejectRequest = async (requestId) => {
-  rejectingRequestId.value = requestId
+  const requestsToReject = requestId ? [requestId] : Array.from(selectedRequests.value)
+  if (requestsToReject.length === 0) {
+    toast({
+      title: 'Error',
+      description: 'Please select at least one request to reject',
+      variant: 'destructive'
+    })
+    return
+  }
+
+  rejectingRequests.value = requestsToReject
+  rejectingRequestId.value = requestsToReject[0]
   rejectionReason.value = ''
   showRejectModal.value = true
 }
@@ -704,44 +716,55 @@ const rejectRequest = async (requestId) => {
 const confirmRejection = async () => {
   try {
     isRejecting.value = true
-    const { data, error } = await client
-      .rpc('update_claim_status', {
-        claim_id: rejectingRequestId.value,
-        new_status: 'rejected',
-        rejection_reason: rejectionReason.value
-      })
-    
-    if (error) throw error
-    
-    // Show success message
+    const requestsToReject = rejectingRequests.value.length > 0
+      ? rejectingRequests.value
+      : (rejectingRequestId.value ? [rejectingRequestId.value] : [])
+
+    if (requestsToReject.length === 0) {
+      throw new Error('No request selected for rejection')
+    }
+
+    const promises = requestsToReject.map(async (id) => {
+      const { error } = await client
+        .rpc('update_claim_status', {
+          claim_id: id,
+          new_status: 'rejected',
+          rejection_reason: rejectionReason.value
+        })
+      
+      if (error) throw error
+
+      try {
+        const { sendClaimRejectionEmail } = await import('~/lib/notifications')
+        await sendClaimRejectionEmail(
+          id,
+          user.value.id,
+          rejectionReason.value
+        )
+      } catch (emailError) {
+        console.error('Failed to send email notification:', emailError)
+      }
+    })
+
+    await Promise.all(promises)
+
     toast({
       title: 'Success',
-      description: 'Request has been rejected',
+      description: `Successfully rejected ${requestsToReject.length} request${requestsToReject.length > 1 ? 's' : ''}`,
       variant: 'default'
     })
-    
-    // Send email notification
-    try {
-      const { sendClaimRejectionEmail } = await import('~/lib/notifications')
-      await sendClaimRejectionEmail(
-        rejectingRequestId.value,
-        user.value.id,
-        rejectionReason.value
-      )
-    } catch (emailError) {
-      console.error('Failed to send email notification:', emailError)
-    }
-    
+
     showRejectModal.value = false
     
-    // Refresh the list
+    selectedRequests.value.clear()
+    rejectingRequests.value = []
     await fetchReimbursementRequests()
     await fetchMonthlyStatusIndicators() // Refresh status indicators
   } catch (err) {
     console.error('Error rejecting request:', err)
     toast({
       title: 'Error',
-      description: 'Failed to reject request',
+      description: 'Failed to reject some requests',
       variant: 'destructive'
     })
   } finally {
@@ -1147,6 +1170,16 @@ onMounted(async () => {
                   <CheckCircle2 class="mr-2 h-4 w-4" />
                   Approve Selected ({{ selectedRequests.size }})
                 </template>
+              </Button>
+              <Button 
+                v-if="hasEmployeeSelectedRequests(employeeId)"
+                @click.stop="rejectRequest(null)"
+                class="bg-red-600 hover:bg-red-700 text-white"
+                size="sm"
+                :disabled="isRejecting"
+              >
+                <XCircle class="mr-2 h-4 w-4" />
+                Reject Selected ({{ selectedRequests.size }})
               </Button>
               <ChevronUp v-if="expandedEmployees[employeeId]" class="h-4 w-4" />
               <ChevronDown v-else class="h-4 w-4" />
