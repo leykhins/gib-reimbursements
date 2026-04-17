@@ -97,21 +97,21 @@ watch(() => [props.url1, props.url2], () => {
             </TabsList>
 
             <TabsContent value="r1">
-              <div class="h-[64vh] overflow-auto">
+              <div class="h-[64vh] overflow-hidden">
                 <div v-if="loading1" class="flex items-center justify-center h-full">
                   <Loader2 class="h-8 w-8 animate-spin text-black" />
                 </div>
-                <img v-else-if="isImg1 && signed1" :src="signed1" class="max-w-full max-h-full object-contain mx-auto" alt="Receipt 1" />
+                <ZoomableImage v-else-if="isImg1 && signed1" :src="signed1" alt="Receipt 1" />
                 <iframe v-else-if="signed1" :src="signed1" class="w-full h-full"></iframe>
               </div>
             </TabsContent>
 
             <TabsContent value="r2">
-              <div class="h-[64vh] overflow-auto">
+              <div class="h-[64vh] overflow-hidden">
                 <div v-if="loading2" class="flex items-center justify-center h-full">
                   <Loader2 class="h-8 w-8 animate-spin text-black" />
                 </div>
-                <img v-else-if="isImg2 && signed2" :src="signed2" class="max-w-full max-h-full object-contain mx-auto" alt="Receipt 2" />
+                <ZoomableImage v-else-if="isImg2 && signed2" :src="signed2" alt="Receipt 2" />
                 <iframe v-else-if="signed2" :src="signed2" class="w-full h-full"></iframe>
               </div>
             </TabsContent>
@@ -119,11 +119,11 @@ watch(() => [props.url1, props.url2], () => {
         </template>
 
         <template v-else>
-          <div class="h-[64vh] overflow-auto">
+          <div class="h-[64vh] overflow-hidden">
             <div v-if="loading1" class="flex items-center justify-center h-full">
               <Loader2 class="h-8 w-8 animate-spin text-black" />
             </div>
-            <img v-else-if="isImg1 && signed1" :src="signed1" class="max-w-full max-h-full object-contain mx-auto" alt="Receipt" />
+            <ZoomableImage v-else-if="isImg1 && signed1" :src="signed1" alt="Receipt" />
             <iframe v-else-if="signed1" :src="signed1" class="w-full h-full"></iframe>
           </div>
         </template>
