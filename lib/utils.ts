@@ -58,3 +58,88 @@ export function isImageFile(filename: string): boolean {
 export function parseLocalDateString(dateString: string): Date {
   return parseDate(dateString.split('T')[0]).toDate(getLocalTimeZone())
 }
+
+export type MonthlyClaimStatusValue = 'completed' | 'has-claims' | undefined
+
+/**
+ * Computes per-month status dots for a year from claim date + status.
+ * Rejected claims are excluded. Green (completed) only when all claims in the month are completed.
+ */
+export function computeMonthlyClaimStatus(
+  claims: Array<{ date: string; status: string }>,
+  selectedYear: number,
+  monthCount = 12
+): Record<number, MonthlyClaimStatusValue> {
+  const status: Record<number, MonthlyClaimStatusValue> = {}
+  const monthCounts: Record<number, { total: number; completed: number }> = {}
+
+  for (let i = 0; i < monthCount; i++) {
+    status[i] = undefined
+  }
+
+  claims.forEach((claim) => {
+    if (claim.status === 'rejected') return
+
+    const dateParts = claim.date.split('-')
+    if (dateParts.length !== 3) return
+
+    const year = parseInt(dateParts[0], 10)
+    const month = parseInt(dateParts[1], 10) - 1
+
+    if (year !== selectedYear) return
+
+    if (!monthCounts[month]) {
+      monthCounts[month] = { total: 0, completed: 0 }
+    }
+    monthCounts[month].total++
+    if (claim.status === 'completed') {
+      monthCounts[month].completed++
+    }
+  })
+
+  Object.entries(monthCounts).forEach(([monthStr, counts]) => {
+    const month = parseInt(monthStr, 10)
+    if (counts.total > 0) {
+      status[month] = counts.total === counts.completed ? 'completed' : 'has-claims'
+    }
+  })
+
+  return status
+}
+
+/** Overwrites base month statuses with values recomputed from loaded claims for those months. */
+export function mergeMonthlyClaimStatus(
+  base: Record<number, MonthlyClaimStatusValue>,
+  loadedClaims: Array<{ date: string; status: string }>,
+  selectedYear: number
+): Record<number, MonthlyClaimStatusValue> {
+  const status = { ...base }
+  const claimsByMonth: Record<number, Array<{ date: string; status: string }>> = {}
+
+  loadedClaims.forEach((claim) => {
+    if (claim.status === 'rejected') return
+
+    const dateParts = claim.date.split('-')
+    if (dateParts.length !== 3) return
+
+    const year = parseInt(dateParts[0], 10)
+    const month = parseInt(dateParts[1], 10) - 1
+
+    if (year !== selectedYear) return
+
+    if (!claimsByMonth[month]) {
+      claimsByMonth[month] = []
+    }
+    claimsByMonth[month].push(claim)
+  })
+
+  Object.entries(claimsByMonth).forEach(([monthStr, monthClaims]) => {
+    const month = parseInt(monthStr, 10)
+    const computed = computeMonthlyClaimStatus(monthClaims, selectedYear)
+    if (computed[month] !== undefined) {
+      status[month] = computed[month]
+    }
+  })
+
+  return status
+}
