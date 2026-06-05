@@ -28,7 +28,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { getReceiptSignedUrl } from '~/lib/utils'
+import { getReceiptSignedUrl, parseLocalDateString, computeMonthlyClaimStatus, mergeMonthlyClaimStatus } from '~/lib/utils'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import RejectedClaims from '@/components/RejectedClaims.vue'
@@ -197,11 +197,9 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
 // Apply filters to reimbursement requests
 const applyFilters = () => {
   filteredRequests.value = reimbursementRequests.value.filter(request => {
-    const requestDate = new Date(request.created_at)
-    const requestMonth = requestDate.getMonth()
-    const requestYear = requestDate.getFullYear()
-    
-    return requestMonth === selectedMonth.value && requestYear === selectedYear.value
+    const requestDate = parseLocalDateString(request.date)
+    return requestDate.getMonth() === selectedMonth.value &&
+      requestDate.getFullYear() === selectedYear.value
   })
   
   // Set all categories to expanded by default
@@ -293,7 +291,8 @@ const formatDateTime = (dateString) => {
 
 const isLateSubmission = (expenseDate, submittedAt) => {
   if (!expenseDate || !submittedAt) return false
-  const deadline = endOfDay(addDays(endOfMonth(new Date(expenseDate)), 7))
+  const localExpenseDate = parseLocalDateString(expenseDate)
+  const deadline = endOfDay(addDays(endOfMonth(localExpenseDate), 7))
   return isAfter(new Date(submittedAt), deadline)
 }
 
@@ -350,37 +349,69 @@ watch(() => filters.value.categoryId, () => {
 const changeMonth = (newMonth) => {
   selectedMonth.value = newMonth
   
-  // Check if we already have data for this month/year
   const hasDataForMonth = reimbursementRequests.value.some(request => {
-    const requestDate = new Date(request.created_at)
+    const requestDate = parseLocalDateString(request.date)
     return requestDate.getMonth() === newMonth && requestDate.getFullYear() === selectedYear.value
   })
   
-  // If we don't have data for this month, fetch it
   if (!hasDataForMonth) {
     fetchReimbursementRequests(newMonth, selectedYear.value)
   } else {
-    // Just apply filters to existing data
     applyFilters()
   }
 }
 
-const changeYear = (newYear) => {
-  selectedYear.value = newYear
-  
-  // Check if we already have data for this year
+watch(selectedYear, (newYear, oldYear) => {
+  if (newYear === oldYear) return
+
+  fetchMonthlyStatusIndicators()
+
   const hasDataForYear = reimbursementRequests.value.some(request => {
-    const requestDate = new Date(request.created_at)
+    const requestDate = parseLocalDateString(request.date)
     return requestDate.getFullYear() === newYear
   })
-  
-  // If we don't have data for this year, fetch it
+
   if (!hasDataForYear) {
     fetchReimbursementRequests(selectedMonth.value, newYear)
   } else {
-    // Just apply filters to existing data
     applyFilters()
   }
+})
+
+const monthlyStatusIndicators = ref({})
+
+const fetchMonthlyStatusIndicators = async () => {
+  try {
+    const startDateStr = `${selectedYear.value}-01-01`
+    const endDateStr = `${selectedYear.value + 1}-01-01`
+
+    const { data, error } = await client
+      .from('claims')
+      .select('date, status')
+      .eq('employee_id', user.value.id)
+      .neq('status', 'rejected')
+      .gte('date', startDateStr)
+      .lt('date', endDateStr)
+
+    if (error) throw error
+
+    monthlyStatusIndicators.value = computeMonthlyClaimStatus(data || [], selectedYear.value)
+  } catch (err) {
+    console.error('Error fetching monthly status indicators:', err)
+  }
+}
+
+const monthlyClaimStatus = computed(() => {
+  return mergeMonthlyClaimStatus(
+    monthlyStatusIndicators.value,
+    reimbursementRequests.value,
+    selectedYear.value
+  )
+})
+
+const refreshClaims = async () => {
+  await fetchReimbursementRequests()
+  await fetchMonthlyStatusIndicators()
 }
 
 // Add bulk approval methods
@@ -462,14 +493,13 @@ const fetchAvailableYears = async () => {
   try {
     const { data, error } = await client
       .from('claims')
-      .select('created_at')
+      .select('date')
       .eq('employee_id', user.value.id)
     
     if (error) throw error
     
-    // Extract unique years from claims
     const uniqueYears = new Set(
-      data.map(claim => new Date(claim.created_at).getFullYear())
+      data.map(claim => parseLocalDateString(claim.date).getFullYear())
     )
     
     // Add current year if not present
@@ -532,7 +562,7 @@ const submitClaim = async (claimData) => {
       description: 'Claim submitted successfully',
       variant: 'default'
     })
-    await fetchReimbursementRequests()
+    await refreshClaims()
   } catch (err) {
     console.error('Error submitting claim:', err)
     toast({
@@ -559,6 +589,7 @@ const grandTotal = computed(() => {
 onMounted(async () => {
   await fetchAvailableYears()
   await fetchCategories()
+  await fetchMonthlyStatusIndicators()
   await fetchReimbursementRequests()
 })
 </script>
@@ -604,17 +635,25 @@ onMounted(async () => {
           <div class="flex overflow-x-auto relative w-full mx-1 scrollbar-hide">
             <div class="absolute left-0 w-4 h-full bg-gradient-to-r from-background to-transparent pointer-events-none z-[1]"></div>
             <div class="flex w-full justify-start lg:justify-center px-1 min-w-0">
-              <div class="flex space-x-1">
+              <div class="flex space-x-2 h-full">
                 <button 
                   v-for="(month, index) in months" 
                   :key="index"
                   :class="[
-                    'px-2 py-1 whitespace-nowrap text-sm shrink-0 rounded-md',
+                    'px-2 py-1 whitespace-nowrap text-sm shrink-0 relative mt-2 mb-1 rounded-md',
                     selectedMonth === index ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary hover:text-white'
                   ]"
                   @click="changeMonth(index)"
                 >
                   {{ month }}
+                  <div 
+                    v-if="monthlyClaimStatus[index]"
+                    class="absolute -top-2 -right-1 w-3 h-3 rounded-full border-2 border-background"
+                    :class="{
+                      'bg-red-500': monthlyClaimStatus[index] === 'has-claims',
+                      'bg-green-500': monthlyClaimStatus[index] === 'completed'
+                    }"
+                  ></div>
                 </button>
               </div>
             </div>
@@ -640,7 +679,7 @@ onMounted(async () => {
       :claims="reimbursementRequests"
       :categories="categories"
       :loading="loading"
-      @refresh-claims="fetchReimbursementRequests"
+      @refresh-claims="refreshClaims"
     />
 
     <!-- Expenses List -->
@@ -947,5 +986,13 @@ onMounted(async () => {
 
 .rotate-180 {
   transform: rotate(180deg);
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 </style> 

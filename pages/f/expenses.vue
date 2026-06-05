@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar'
 import { addDays } from 'date-fns'
 import { cn } from '@/lib/utils'
-import { getReceiptSignedUrl, parseLocalDateString } from '~/lib/utils'
+import { getReceiptSignedUrl, parseLocalDateString, computeMonthlyClaimStatus, mergeMonthlyClaimStatus } from '~/lib/utils'
 
 import { 
   CalendarIcon, 
@@ -684,39 +684,7 @@ const fetchMonthlyStatusIndicators = async () => {
     
     if (error) throw error
     
-    // Initialize all months
-    const status = {}
-    months.forEach((_, index) => {
-      status[index] = undefined
-    })
-    
-    // Process the status data - parse date string directly to avoid timezone issues
-    if (data) {
-      data.forEach(claim => {
-        // Skip rejected claims (extra safety check)
-        if (claim.status === 'rejected') return
-        
-        // Parse date string directly (YYYY-MM-DD format)
-        const dateParts = claim.date.split('-')
-        if (dateParts.length === 3) {
-          const year = parseInt(dateParts[0], 10)
-          const month = parseInt(dateParts[1], 10) - 1 // Convert to 0-based month index
-          
-          if (year === selectedYear.value) {
-            // If any claim in this month is completed, mark as completed
-            if (claim.status === 'completed') {
-              status[month] = 'completed'
-            } 
-            // Otherwise mark as having claims if not already marked as completed
-            else if (status[month] !== 'completed') {
-              status[month] = 'has-claims'
-            }
-          }
-        }
-      })
-    }
-    
-    monthlyStatusIndicators.value = status
+    monthlyStatusIndicators.value = computeMonthlyClaimStatus(data || [], selectedYear.value)
   } catch (err) {
     console.error('Error fetching monthly status indicators:', err)
   }
@@ -724,31 +692,11 @@ const fetchMonthlyStatusIndicators = async () => {
 
 // Update the monthlyClaimStatus computed property
 const monthlyClaimStatus = computed(() => {
-  // Use the separate status indicators, but also check loaded claims as fallback
-  const status = { ...monthlyStatusIndicators.value }
-  
-  // Also process any loaded claims as a fallback/update
-  reimbursementRequests.value.forEach(request => {
-    // Skip rejected claims
-    if (request.status === 'rejected') return
-    
-    // Parse date string directly to avoid timezone issues
-    const dateParts = request.date.split('-')
-    if (dateParts.length === 3) {
-      const year = parseInt(dateParts[0], 10)
-      const month = parseInt(dateParts[1], 10) - 1 // Convert to 0-based month index
-      
-      if (year === selectedYear.value) {
-        if (request.status === 'completed') {
-          status[month] = 'completed'
-        } else if (status[month] !== 'completed') {
-          status[month] = 'has-claims'
-        }
-      }
-    }
-  })
-  
-  return status
+  return mergeMonthlyClaimStatus(
+    monthlyStatusIndicators.value,
+    reimbursementRequests.value,
+    selectedYear.value
+  )
 })
 
 // Add new ref for expanded job groups
