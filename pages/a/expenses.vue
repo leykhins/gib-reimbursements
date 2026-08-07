@@ -763,35 +763,53 @@
         throw new Error('No request selected for rejection')
       }
 
-      const promises = requestsToReject.map(async (id) => {
-        const { error } = await client
-          .rpc('update_claim_status', {
-            claim_id: id,
-            new_status: 'rejected',
-            rejection_reason: rejectionReason.value
-          })
+      const succeeded: string[] = []
+      const failed: string[] = []
 
-        if (error) throw error
-
+      for (const id of requestsToReject) {
         try {
-          const { sendClaimRejectionEmail } = await import('~/lib/notifications')
-          await sendClaimRejectionEmail(
-            id,
-            user.value.id,
-            rejectionReason.value
-          )
-        } catch (emailError) {
-          console.error('Failed to send email notification:', emailError)
+          const { error } = await client
+            .rpc('update_claim_status', {
+              claim_id: id,
+              new_status: 'rejected',
+              rejection_reason: rejectionReason.value
+            })
+
+          if (error) throw error
+
+          try {
+            const { sendClaimRejectionEmail } = await import('~/lib/notifications')
+            await sendClaimRejectionEmail(
+              id,
+              user.value.id,
+              rejectionReason.value
+            )
+          } catch (emailError) {
+            console.error('Failed to send email notification:', emailError)
+          }
+
+          succeeded.push(id)
+        } catch (err) {
+          console.error(`Error rejecting request ${id}:`, err)
+          failed.push(id)
         }
-      })
+      }
 
-      await Promise.all(promises)
-
-      toast({
-        title: 'Success',
-        description: `Successfully rejected ${requestsToReject.length} request${requestsToReject.length > 1 ? 's' : ''}`,
-        variant: 'default'
-      })
+      if (failed.length === 0) {
+        toast({
+          title: 'Success',
+          description: `Successfully rejected ${succeeded.length} request${succeeded.length > 1 ? 's' : ''}`,
+          variant: 'default'
+        })
+      } else if (succeeded.length === 0) {
+        throw new Error('Failed to reject all selected requests')
+      } else {
+        toast({
+          title: 'Partial Success',
+          description: `Rejected ${succeeded.length} request${succeeded.length > 1 ? 's' : ''}, but ${failed.length} failed. Please refresh and retry the remaining claims.`,
+          variant: 'destructive'
+        })
+      }
 
       showRejectModal.value = false
       
