@@ -42,6 +42,7 @@ definePageMeta({
 const client = useSupabaseClient()
 const user = useSupabaseUser()
 const reimbursementRequests = ref([])
+const rejectedClaims = ref([])
 const filteredRequests = ref([])
 const loading = ref(true)
 const error = ref(null)
@@ -409,9 +410,38 @@ const monthlyClaimStatus = computed(() => {
   )
 })
 
+const fetchRejectedClaims = async () => {
+  try {
+    const { data, error: fetchError } = await client
+      .from('claims')
+      .select(`
+        *,
+        claim_categories:category_id(id, category_name, requires_license_number),
+        category_subcategory_mapping:subcategory_mapping_id(
+          id,
+          requires_job_number,
+          requires_employee_name,
+          requires_client_info,
+          claim_subcategories:subcategory_id(id, subcategory_name)
+        )
+      `)
+      .eq('employee_id', user.value.id)
+      .eq('status', 'rejected')
+      .order('created_at', { ascending: false })
+
+    if (fetchError) throw fetchError
+    rejectedClaims.value = data || []
+  } catch (err) {
+    console.error('Error fetching rejected claims:', err)
+  }
+}
+
 const refreshClaims = async () => {
-  await fetchReimbursementRequests()
-  await fetchMonthlyStatusIndicators()
+  await Promise.all([
+    fetchReimbursementRequests(),
+    fetchRejectedClaims(),
+    fetchMonthlyStatusIndicators()
+  ])
 }
 
 // Add bulk approval methods
@@ -590,7 +620,10 @@ onMounted(async () => {
   await fetchAvailableYears()
   await fetchCategories()
   await fetchMonthlyStatusIndicators()
-  await fetchReimbursementRequests()
+  await Promise.all([
+    fetchReimbursementRequests(),
+    fetchRejectedClaims()
+  ])
 })
 </script>
 
@@ -675,8 +708,8 @@ onMounted(async () => {
 
     <!-- Rejected Claims requiring attention -->
     <RejectedClaims
-      v-if="reimbursementRequests.some(r => r.status === 'rejected')"
-      :claims="reimbursementRequests"
+      v-if="rejectedClaims.length > 0"
+      :claims="rejectedClaims"
       :categories="categories"
       :loading="loading"
       @refresh-claims="refreshClaims"

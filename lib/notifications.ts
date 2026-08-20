@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { emailRateLimiter } from './rateLimiter'
+import { isReviewerQueueClaim } from './claimRouting'
 
 /**
  * Formats a currency amount to CAD format
@@ -90,7 +91,7 @@ export const getClaimDetailsForEmail = async (
         id,
         claim_subcategories:subcategory_id(subcategory_name)
       ),
-      users!claims_employee_id_fkey(first_name, last_name, email)
+      users!claims_employee_id_fkey(first_name, last_name, email, role)
     `)
     .eq('id', claimId)
     .single()
@@ -112,7 +113,8 @@ export const getClaimDetailsForEmail = async (
       email: data.users.email,
       firstName: data.users.first_name,
       lastName: data.users.last_name,
-      fullName: `${data.users.first_name} ${data.users.last_name}`
+      fullName: `${data.users.first_name} ${data.users.last_name}`,
+      role: data.users.role
     }
   }
 }
@@ -142,12 +144,10 @@ export const sendClaimRejectionEmail = async (
   rejectionReason: string
 ) => {
   try {
-    // Get claim and user details
     const client = useSupabaseClient()
     const { claimData, userData } = await getClaimDetailsForEmail(client, claimId)
     const rejectorName = await getUserNameById(client, rejectedBy)
     
-    // Send email notification
     await $fetch('/api/send-notification', {
       method: 'POST',
       body: {
@@ -303,6 +303,28 @@ export const getAllAdminDetails = async (client: any) => {
   }))
 }
 
+export const getAllReviewerDetails = async (client: any) => {
+  const { data, error } = await client
+    .from('users')
+    .select('email, first_name, last_name')
+    .eq('role', 'reviewer')
+  
+  if (error) throw error
+  
+  return (data || []).map(reviewer => ({
+    email: reviewer.email,
+    name: `${reviewer.first_name} ${reviewer.last_name}`
+  }))
+}
+
+const getFirstReviewRecipients = async (client: any, claimData: { job_number?: string | null }, userData: { role?: string | null }) => {
+  if (isReviewerQueueClaim({ job_number: claimData.job_number, users: { role: userData.role } })) {
+    const reviewers = await getAllReviewerDetails(client)
+    if (reviewers.length) return reviewers
+  }
+  return getAllAdminDetails(client)
+}
+
 // Update the sendClaimSubmissionEmail function to handle multiple admins
 export const sendClaimSubmissionEmail = async (
   claimId: string
@@ -310,7 +332,7 @@ export const sendClaimSubmissionEmail = async (
   try {
     const client = useSupabaseClient()
     const { claimData, userData } = await getClaimDetailsForEmail(client, claimId)
-    const adminDetails = await getAllAdminDetails(client)
+    const adminDetails = await getFirstReviewRecipients(client, claimData, userData)
     
     // Send email to all admins with rate limiting
     const emailPromises = adminDetails.map(admin => 
@@ -648,7 +670,7 @@ export const getClaimDetailsWithDepartment = async (
         id,
         claim_subcategories:subcategory_id(subcategory_name)
       ),
-      users!claims_employee_id_fkey(first_name, last_name, email, department)
+      users!claims_employee_id_fkey(first_name, last_name, email, department, role)
     `)
     .eq('id', claimId)
     .single()
@@ -671,7 +693,8 @@ export const getClaimDetailsWithDepartment = async (
       firstName: data.users.first_name,
       lastName: data.users.last_name,
       fullName: `${data.users.first_name} ${data.users.last_name}`,
-      department: data.users.department
+      department: data.users.department,
+      role: data.users.role
     }
   }
 }
@@ -796,21 +819,7 @@ export const sendEnhancedAdminVerificationEmail = async (claimId: string) => {
       )
     )
     
-    // Send notification to employee about verification
-    const employeePromise = emailRateLimiter.addToQueue(() => 
-      $fetch('/api/send-notification', {
-        method: 'POST',
-        body: {
-          recipientEmail: userData.email,
-          recipientName: userData.fullName,
-          claimId: claimId,
-          claimDetails: claimData,
-          notificationType: 'employee_verification'
-        }
-      })
-    )
-    
-    await Promise.all([...managerPromises, employeePromise])
+    await Promise.all(managerPromises)
     
     return { success: true }
   } catch (error) {
@@ -847,21 +856,7 @@ export const sendEnhancedManagerApprovalEmail = async (claimId: string) => {
       )
     )
     
-    // Send notification to employee about approval
-    const employeePromise = emailRateLimiter.addToQueue(() => 
-      $fetch('/api/send-notification', {
-        method: 'POST',
-        body: {
-          recipientEmail: userData.email,
-          recipientName: userData.fullName,
-          claimId: claimId,
-          claimDetails: claimData,
-          notificationType: 'employee_approval'
-        }
-      })
-    )
-    
-    await Promise.all([...accountantPromises, employeePromise])
+    await Promise.all(accountantPromises)
     
     return { success: true }
   } catch (error) {
@@ -1029,7 +1024,7 @@ export const generateEmployeeSubmissionConfirmationContent = (
         <p><strong>Status:</strong> Submitted - Under Admin Review</p>
       </div>
       
-      <p>Your claim will be reviewed by our admin team. You'll receive notifications as it progresses through the approval process.</p>
+      <p>Your claim will be reviewed by our admin team. You'll receive an email once it has been processed by accounting.</p>
       
       <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
         <p>This is an automated notification from the GibClaim System.</p>
@@ -1045,7 +1040,7 @@ export const sendEnhancedClaimSubmissionEmail = async (claimId: string) => {
   try {
     const client = useSupabaseClient()
     const { claimData, userData } = await getClaimDetailsForEmail(client, claimId)
-    const adminDetails = await getAllAdminDetails(client)
+    const adminDetails = await getFirstReviewRecipients(client, claimData, userData)
     
     // Send confirmation email to the employee
     const employeePromise = emailRateLimiter.addToQueue(() => 
@@ -1099,9 +1094,13 @@ export const sendEnhancedConsolidatedClaimSubmissionEmail = async (
     // Get details for all claims
     const claimsPromises = claimIds.map(claimId => getClaimDetailsForEmail(client, claimId))
     const claimsDetails = await Promise.all(claimsPromises)
-    
-    // Get all admin details
-    const adminDetails = await getAllAdminDetails(client)
+
+    const reviewerGroup = claimsDetails.filter(({ claimData, userData }) =>
+      isReviewerQueueClaim({ job_number: claimData.job_number, users: { role: userData.role } })
+    )
+    const adminGroup = claimsDetails.filter(({ claimData, userData }) =>
+      !isReviewerQueueClaim({ job_number: claimData.job_number, users: { role: userData.role } })
+    )
     
     // Calculate total amount
     const totalAmount = claimsDetails.reduce((sum, { claimData }) => sum + claimData.amount, 0)
@@ -1136,7 +1135,7 @@ export const sendEnhancedConsolidatedClaimSubmissionEmail = async (
           <p><strong>Status:</strong> Submitted - Under Admin Review</p>
         </div>
         
-        <p>Your claims will be reviewed by our admin team. You'll receive notifications as they progress through the approval process.</p>
+        <p>Your claims will be reviewed by our admin team. You'll receive an email once they have been processed by accounting.</p>
         
         <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
           <p>This is an automated notification from the GibClaim System.</p>
@@ -1158,24 +1157,34 @@ export const sendEnhancedConsolidatedClaimSubmissionEmail = async (
       })
     )
     
-    // Send email to all admins with rate limiting
-    const adminPromises = adminDetails.map(admin => {
-      // Generate email content for each admin
+    // Send email to the matching first-line reviewers
+    let reviewerRecipients = reviewerGroup.length ? await getAllReviewerDetails(client) : []
+    if (reviewerGroup.length && !reviewerRecipients.length) {
+      reviewerRecipients = await getAllAdminDetails(client)
+    }
+    const adminRecipients = adminGroup.length ? await getAllAdminDetails(client) : []
+
+    const buildQueueEmail = (
+      group: typeof claimsDetails,
+      person: { email: string, name: string },
+      dashboardName: string
+    ) => {
+      const groupTotal = group.reduce((sum, { claimData }) => sum + claimData.amount, 0)
       const consolidatedContent = `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #2563eb;">New Claims Submission</h2>
-          <p>Hello ${admin.name},</p>
+          <p>Hello ${person.name},</p>
           <p>New reimbursement claims have been submitted by ${claimsDetails[0].userData.fullName} that require your verification.</p>
           
           <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
             <h3 style="margin-top: 0;">Claims Summary</h3>
-            <p><strong>Total Claims:</strong> ${claimIds.length}</p>
-            <p><strong>Total Amount:</strong> ${formatCurrency(totalAmount)}</p>
+            <p><strong>Total Claims:</strong> ${group.length}</p>
+            <p><strong>Total Amount:</strong> ${formatCurrency(groupTotal)}</p>
           </div>
           
           <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
             <h3 style="margin-top: 0;">Claim Details</h3>
-            ${claimsDetails.map(({ claimData }) => `
+            ${group.map(({ claimData }) => `
               <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #e5e7eb;">
                 <p><strong>Date:</strong> ${formatDate(claimData.date)}</p>
                 <p><strong>Description:</strong> ${claimData.description}</p>
@@ -1186,7 +1195,7 @@ export const sendEnhancedConsolidatedClaimSubmissionEmail = async (
             `).join('')}
           </div>
           
-          <p>Please review these claims in the admin dashboard.</p>
+          <p>Please review these claims in the ${dashboardName} dashboard.</p>
           
           <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
             <p>This is an automated notification from the GibClaim System.</p>
@@ -1194,22 +1203,27 @@ export const sendEnhancedConsolidatedClaimSubmissionEmail = async (
         </div>
       `
 
-      return emailRateLimiter.addToQueue(() => 
+      return emailRateLimiter.addToQueue(() =>
         $fetch('/api/send-notification', {
           method: 'POST',
           body: {
-            recipientEmail: admin.email,
-            recipientName: admin.name,
-            claimIds: claimIds,
-            claimsDetails: claimsDetails.map(({ claimData }) => claimData),
+            recipientEmail: person.email,
+            recipientName: person.name,
+            claimIds: group.map(({ claimData }) => claimData.id),
+            claimsDetails: group.map(({ claimData }) => claimData),
             notificationType: 'consolidated_submission',
             employeeName: claimsDetails[0].userData.fullName,
-            totalAmount: totalAmount,
+            totalAmount: groupTotal,
             htmlContent: consolidatedContent
           }
         })
       )
-    })
+    }
+
+    const adminPromises = [
+      ...reviewerRecipients.flatMap(person => reviewerGroup.length ? [buildQueueEmail(reviewerGroup, person, 'reviewer')] : []),
+      ...adminRecipients.flatMap(person => adminGroup.length ? [buildQueueEmail(adminGroup, person, 'admin')] : [])
+    ]
     
     await Promise.all([employeePromise, ...adminPromises])
     
@@ -1292,44 +1306,6 @@ export const sendConsolidatedAdminVerificationEmail = async (claimIds: string[])
         </div>
       `
       
-      // Generate consolidated email content for employee
-      const employeeContent = `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #2563eb;">Claims Verified by Admin</h2>
-          <p>Hello ${userData.fullName},</p>
-          <p>Your reimbursement claims have been verified by admin and are now awaiting manager approval.</p>
-          
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <h3 style="margin-top: 0;">Summary</h3>
-            <p><strong>Total Claims:</strong> ${claims.length}</p>
-            <p><strong>Total Amount:</strong> ${formatCurrency(totalAmount)}</p>
-          </div>
-          
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <h3 style="margin-top: 0;">Claim Details</h3>
-            ${claims.map(claim => `
-              <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #e5e7eb;">
-                <p><strong>Date:</strong> ${formatDate(claim.date)}</p>
-                <p><strong>Description:</strong> ${claim.description}</p>
-                <p><strong>Amount:</strong> ${formatCurrency(claim.amount)}</p>
-                <p><strong>Category:</strong> ${claim.category_name} - ${claim.subcategory_name}</p>
-                ${claim.job_number ? `<p><strong>Job Number:</strong> ${claim.job_number}</p>` : ''}
-              </div>
-            `).join('')}
-          </div>
-          
-          <div style="background-color: #dbeafe; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #2563eb;">
-            <p><strong>Status:</strong> Verified - Awaiting Manager Approval</p>
-          </div>
-          
-          <p>Your claims are progressing through the approval process. You'll be notified once they're approved by your manager.</p>
-          
-          <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-            <p>This is an automated notification from the GibClaim System.</p>
-          </div>
-        </div>
-      `
-      
       // Send to managers
       const managerPromises = managerDetails.map(manager => 
         emailRateLimiter.addToQueue(() => 
@@ -1348,22 +1324,7 @@ export const sendConsolidatedAdminVerificationEmail = async (claimIds: string[])
         )
       )
       
-      // Send to employee
-      const employeePromise = emailRateLimiter.addToQueue(() => 
-        $fetch('/api/send-notification', {
-          method: 'POST',
-          body: {
-            recipientEmail: userData.email,
-            recipientName: userData.fullName,
-            claimIds: claims.map(c => c.id),
-            claimsDetails: claims,
-            notificationType: 'consolidated_employee_verification',
-            htmlContent: employeeContent
-          }
-        })
-      )
-      
-      await Promise.all([...managerPromises, employeePromise])
+      await Promise.all(managerPromises)
     }
     
     return { success: true }
@@ -1439,44 +1400,6 @@ export const sendConsolidatedManagerApprovalEmail = async (claimIds: string[]) =
         </div>
       `
       
-      // Generate consolidated email content for employee
-      const employeeContent = `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #16a34a;">Claims Approved by Manager</h2>
-          <p>Hello ${userData.fullName},</p>
-          <p>Great news! Your reimbursement claims have been approved by your manager and are now being processed by accounting.</p>
-          
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <h3 style="margin-top: 0;">Summary</h3>
-            <p><strong>Total Claims:</strong> ${claims.length}</p>
-            <p><strong>Total Amount:</strong> ${formatCurrency(totalAmount)}</p>
-          </div>
-          
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <h3 style="margin-top: 0;">Claim Details</h3>
-            ${claims.map(claim => `
-              <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #e5e7eb;">
-                <p><strong>Date:</strong> ${formatDate(claim.date)}</p>
-                <p><strong>Description:</strong> ${claim.description}</p>
-                <p><strong>Amount:</strong> ${formatCurrency(claim.amount)}</p>
-                <p><strong>Category:</strong> ${claim.category_name} - ${claim.subcategory_name}</p>
-                ${claim.job_number ? `<p><strong>Job Number:</strong> ${claim.job_number}</p>` : ''}
-              </div>
-            `).join('')}
-          </div>
-          
-          <div style="background-color: #dcfce7; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #16a34a;">
-            <p><strong>Status:</strong> Approved - Being Processed for Payment</p>
-          </div>
-          
-          <p>Your claims are now in the final processing stage. You'll receive another notification once payment has been completed.</p>
-          
-          <div style="margin-top: 30px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 15px;">
-            <p>This is an automated notification from the GibClaim System.</p>
-          </div>
-        </div>
-      `
-      
       // Send to accountants
       const accountantPromises = accountantDetails.map(accountant => 
         emailRateLimiter.addToQueue(() => 
@@ -1495,22 +1418,7 @@ export const sendConsolidatedManagerApprovalEmail = async (claimIds: string[]) =
         )
       )
       
-      // Send to employee
-      const employeePromise = emailRateLimiter.addToQueue(() => 
-        $fetch('/api/send-notification', {
-          method: 'POST',
-          body: {
-            recipientEmail: userData.email,
-            recipientName: userData.fullName,
-            claimIds: claims.map(c => c.id),
-            claimsDetails: claims,
-            notificationType: 'consolidated_employee_approval',
-            htmlContent: employeeContent
-          }
-        })
-      )
-      
-      await Promise.all([...accountantPromises, employeePromise])
+      await Promise.all(accountantPromises)
     }
     
     return { success: true }
@@ -1617,12 +1525,10 @@ export const sendConsolidatedRejectionEmail = async (
   try {
     const client = useSupabaseClient()
     
-    // Get details for all claims
     const claimsPromises = claimIds.map(claimId => getClaimDetailsWithDepartment(client, claimId))
     const claimsDetails = await Promise.all(claimsPromises)
     const rejectorName = await getUserNameById(client, rejectedBy)
     
-    // Group claims by employee
     const claimsByEmployee = claimsDetails.reduce((acc, { claimData, userData }) => {
       const key = userData.employeeId
       if (!acc[key]) {
@@ -1635,11 +1541,9 @@ export const sendConsolidatedRejectionEmail = async (
       return acc
     }, {})
     
-    // Send notifications for each employee
-    for (const [employeeId, { userData, claims }] of Object.entries(claimsByEmployee)) {
+    for (const [, { userData, claims }] of Object.entries(claimsByEmployee)) {
       const totalAmount = claims.reduce((sum, claim) => sum + claim.amount, 0)
       
-      // Generate consolidated email content for employee
       const employeeContent = `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #e11d48;">Claims Rejection Notification</h2>
@@ -1680,7 +1584,6 @@ export const sendConsolidatedRejectionEmail = async (
         </div>
       `
       
-      // Send to employee
       await emailRateLimiter.addToQueue(() => 
         $fetch('/api/send-notification', {
           method: 'POST',
@@ -1769,7 +1672,7 @@ export const sendEnhancedClaimSubmissionEmailWithErrorHandling = async (
   try {
     const client = useSupabaseClient()
     const { claimData, userData } = await getClaimDetailsForEmail(client, claimId)
-    const adminDetails = await getAllAdminDetails(client)
+    const adminDetails = await getFirstReviewRecipients(client, claimData, userData)
     
     const allResults: EmailNotificationResult[] = []
     const allErrors: EmailNotificationResult[] = []

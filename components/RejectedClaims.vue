@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { ref, computed, onMounted, watch, nextTick } from 'vue'
+  import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
   import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
   import { Button } from '@/components/ui/button'
   import { Input } from '@/components/ui/input'
@@ -47,6 +47,28 @@
   // Google Maps
   let distanceMatrixService: any = null
   const isGoogleMapsLoaded = ref(false)
+  let mapsLoadPoll: ReturnType<typeof setInterval> | null = null
+
+  const clearMapsLoadPoll = () => {
+    if (mapsLoadPoll) {
+      clearInterval(mapsLoadPoll)
+      mapsLoadPoll = null
+    }
+  }
+
+  const startMapsLoadPoll = (onReady: () => void, isReady: () => boolean = () => isGoogleMapsLoaded.value) => {
+    clearMapsLoadPoll()
+    let attempts = 0
+    mapsLoadPoll = setInterval(() => {
+      attempts++
+      if (isReady()) {
+        clearMapsLoadPoll()
+        onReady()
+      } else if (attempts >= 50) {
+        clearMapsLoadPoll()
+      }
+    }, 200)
+  }
 
   // State management
   const error = ref('')
@@ -396,16 +418,12 @@
             calculateEditDistance()
           }
         } else {
-          // Maps not loaded yet — poll until ready then calculate
-          const poll = setInterval(() => {
-            if (isGoogleMapsLoaded.value) {
-              clearInterval(poll)
-              setupEditAutocomplete()
-              if (editForm.value.startLocation && editForm.value.destination) {
-                calculateEditDistance()
-              }
+          startMapsLoadPoll(() => {
+            setupEditAutocomplete()
+            if (editForm.value.startLocation && editForm.value.destination) {
+              calculateEditDistance()
             }
-          }, 200)
+          })
         }
       })
     }
@@ -420,6 +438,21 @@
       editFormErrors.value.description = 'Description is required'
       isValid = false
     }
+
+    if (isEditingMileageCategory.value) {
+      if (!editForm.value.startLocation?.trim()) {
+        editFormErrors.value.startLocation = 'Start address is required'
+        isValid = false
+      }
+      if (!editForm.value.destination?.trim()) {
+        editFormErrors.value.destination = 'Destination is required'
+        isValid = false
+      }
+      if (!editForm.value.distance || parseFloat(editForm.value.distance) <= 0) {
+        editFormErrors.value.distance = 'Valid distance is required'
+        isValid = false
+      }
+    }
     
     if (!editForm.value.amount || parseFloat(editForm.value.amount) <= 0) {
       editFormErrors.value.amount = 'Valid amount is required'
@@ -433,6 +466,27 @@
     
     if (!editForm.value.subcategoryMappingId) {
       editFormErrors.value.subcategoryMappingId = 'Subcategory is required'
+      isValid = false
+    }
+
+    if (showEditField.value('jobNumber') && !editForm.value.jobNumber?.toString().trim()) {
+      editFormErrors.value.jobNumber = 'Job number is required'
+      isValid = false
+    }
+    if (showEditField.value('licenseNumber') && !editForm.value.licenseNumber?.trim()) {
+      editFormErrors.value.licenseNumber = 'License number is required'
+      isValid = false
+    }
+    if (showEditField.value('relatedEmployee') && !editForm.value.relatedEmployee?.trim()) {
+      editFormErrors.value.relatedEmployee = 'Employee name is required'
+      isValid = false
+    }
+    if (showEditField.value('clientName') && !editForm.value.clientName?.trim()) {
+      editFormErrors.value.clientName = 'Client name is required'
+      isValid = false
+    }
+    if (showEditField.value('companyName') && !editForm.value.companyName?.trim()) {
+      editFormErrors.value.companyName = 'Company name is required'
       isValid = false
     }
     
@@ -597,7 +651,11 @@
 
   // Watch edit modal open to setup autocomplete for mileage claims
   watch(showEditModal, (isOpen) => {
-    if (isOpen && isEditingMileageCategory.value) {
+    if (!isOpen) {
+      clearMapsLoadPoll()
+      return
+    }
+    if (isEditingMileageCategory.value) {
       if (isGoogleMapsLoaded.value) {
         setupEditAutocomplete()
       }
@@ -627,15 +685,13 @@
         script.onload = initEditGoogleMaps
         document.head.appendChild(script)
       } else {
-        // Script tag exists but may not have fired onload yet — poll briefly
-        const poll = setInterval(() => {
-          if (window.google?.maps) {
-            clearInterval(poll)
-            initEditGoogleMaps()
-          }
-        }, 200)
+        startMapsLoadPoll(() => initEditGoogleMaps(), () => !!window.google?.maps)
       }
     }
+  })
+
+  onUnmounted(() => {
+    clearMapsLoadPoll()
   })
 
   const viewReceipt = (claim: any) => {
@@ -870,11 +926,13 @@
           <div v-if="showEditField('clientName') || showEditField('companyName')" class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div v-if="showEditField('clientName')" class="space-y-2">
               <Label class="flex items-center">Client Name <span class="text-red-500 ml-1">*</span></Label>
-              <Input v-model="editForm.clientName" placeholder="Enter client name" />
+              <Input v-model="editForm.clientName" placeholder="Enter client name" :class="{ 'border-red-500': editFormErrors.clientName }" />
+              <p v-if="editFormErrors.clientName" class="text-sm text-red-500">{{ editFormErrors.clientName }}</p>
             </div>
             <div v-if="showEditField('companyName')" class="space-y-2">
               <Label class="flex items-center">Company Name <span class="text-red-500 ml-1">*</span></Label>
-              <Input v-model="editForm.companyName" placeholder="Enter company name" />
+              <Input v-model="editForm.companyName" placeholder="Enter company name" :class="{ 'border-red-500': editFormErrors.companyName }" />
+              <p v-if="editFormErrors.companyName" class="text-sm text-red-500">{{ editFormErrors.companyName }}</p>
             </div>
           </div>
 
@@ -917,15 +975,18 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div v-if="showEditField('jobNumber')" class="space-y-2">
               <Label class="flex items-center">Job Number <span class="text-red-500 ml-1">*</span></Label>
-              <Input v-model="editForm.jobNumber" placeholder="Enter job number" type="number" />
+              <Input v-model="editForm.jobNumber" placeholder="Enter job number" type="number" :class="{ 'border-red-500': editFormErrors.jobNumber }" />
+              <p v-if="editFormErrors.jobNumber" class="text-sm text-red-500">{{ editFormErrors.jobNumber }}</p>
             </div>
             <div v-if="showEditField('licenseNumber')" class="space-y-2">
               <Label class="flex items-center">License Number <span class="text-red-500 ml-1">*</span></Label>
-              <Input v-model="editForm.licenseNumber" placeholder="Enter license number" />
+              <Input v-model="editForm.licenseNumber" placeholder="Enter license number" :class="{ 'border-red-500': editFormErrors.licenseNumber }" />
+              <p v-if="editFormErrors.licenseNumber" class="text-sm text-red-500">{{ editFormErrors.licenseNumber }}</p>
             </div>
             <div v-if="showEditField('relatedEmployee')" class="space-y-2">
               <Label class="flex items-center">Employee Name <span class="text-red-500 ml-1">*</span></Label>
-              <Input v-model="editForm.relatedEmployee" placeholder="Enter employee name" />
+              <Input v-model="editForm.relatedEmployee" placeholder="Enter employee name" :class="{ 'border-red-500': editFormErrors.relatedEmployee }" />
+              <p v-if="editFormErrors.relatedEmployee" class="text-sm text-red-500">{{ editFormErrors.relatedEmployee }}</p>
             </div>
           </div>
 
@@ -1011,7 +1072,10 @@
                   v-model="editForm.startLocation"
                   placeholder="Start address"
                   autocomplete="off"
+                  :class="{ 'border-red-500': editFormErrors.startLocation }"
+                  @blur="calculateEditDistance"
                 />
+                <p v-if="editFormErrors.startLocation" class="text-sm text-red-500">{{ editFormErrors.startLocation }}</p>
               </div>
 
               <!-- Destination -->
@@ -1022,7 +1086,10 @@
                   v-model="editForm.destination"
                   placeholder="Destination"
                   autocomplete="off"
+                  :class="{ 'border-red-500': editFormErrors.destination }"
+                  @blur="calculateEditDistance"
                 />
+                <p v-if="editFormErrors.destination" class="text-sm text-red-500">{{ editFormErrors.destination }}</p>
               </div>
             </div>
 
@@ -1030,7 +1097,8 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-md">
               <div class="space-y-2">
                 <Label class="font-semibold">Distance (km)</Label>
-                <Input :value="editForm.distance || ''" readonly class="bg-gray-100 font-bold" placeholder="Auto-calculated" />
+                <Input :value="editForm.distance || ''" readonly class="bg-gray-100 font-bold" placeholder="Auto-calculated" :class="{ 'border-red-500': editFormErrors.distance }" />
+                <p v-if="editFormErrors.distance" class="text-sm text-red-500">{{ editFormErrors.distance }}</p>
               </div>
               <div class="space-y-2">
                 <Label class="font-semibold">Total Amount ($)</Label>

@@ -3,8 +3,7 @@ import { toast } from '@/components/ui/toast'
 export default defineNuxtRouteMiddleware(async (to) => {
   const client = useSupabaseClient()
   const user = useSupabaseUser()
-  
-  // If no user, redirect to login
+
   if (!user.value) {
     toast({
       title: 'Authentication Required',
@@ -13,45 +12,36 @@ export default defineNuxtRouteMiddleware(async (to) => {
     })
     return navigateTo('/')
   }
-  
+
   try {
-    // Check if user is manager or admin
     const { data, error } = await client
       .from('users')
       .select('role')
       .eq('id', user.value.id)
       .single()
-    
+
     if (error) throw error
-    
-    // If admin, always allow access without redirection
-    if (data.role === 'admin') {
+
+    if (data.role === 'admin' || data.role === 'reviewer') {
       return
     }
-    
-    // If manager, allow access
-    if (data.role === 'manager') {
-      return
-    }
-    
-    // If not manager or admin, redirect to appropriate dashboard based on role
+
     toast({
       title: 'Access Denied',
-      description: 'You do not have manager privileges to access this page',
+      description: 'You do not have reviewer privileges to access this page',
       variant: 'destructive'
     })
-    
+
     switch (data.role) {
-      case 'accountant':
+      case 'manager':
+        return navigateTo('/m/')
       case 'accounting':
         return navigateTo('/f/')
-      case 'reviewer':
-        return navigateTo('/r/')
       default:
         return navigateTo('/e/')
     }
   } catch (error) {
-    console.error('Error checking manager status:', error)
+    console.error('Error checking reviewer status:', error)
     toast({
       title: 'Authentication Error',
       description: 'There was a problem verifying your access rights',
@@ -59,4 +49,4 @@ export default defineNuxtRouteMiddleware(async (to) => {
     })
     return navigateTo('/e/')
   }
-}) 
+})

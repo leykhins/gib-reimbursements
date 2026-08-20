@@ -3,7 +3,7 @@ export interface User {
   email: string;
   full_name: string;
   department: string;
-  role: 'employee' | 'admin' | 'manager' | 'accounting';
+  role: 'employee' | 'admin' | 'manager' | 'accounting' | 'reviewer';
   mileage_rate?: number;
   created_at: string;
   updated_at: string;

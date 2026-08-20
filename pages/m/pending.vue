@@ -27,6 +27,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getReceiptSignedUrl } from '~/lib/utils'
+import { skipsManagerApproval } from '~/lib/claimRouting'
 
 definePageMeta({
   layout: 'manager',
@@ -250,7 +251,7 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
       .from('claims')
       .select(`
         *,
-        users:users!claims_employee_id_fkey(first_name, last_name, department),
+        users:users!claims_employee_id_fkey(first_name, last_name, department, role),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
@@ -307,8 +308,12 @@ const applyFilters = () => {
       return false
     }
     
-    // Only show admin_verified requests
+    // Only show verified requests that still need manager approval
     if (request.status !== 'verified') {
+      return false
+    }
+
+    if (request.employee_id === user.value?.id || skipsManagerApproval(request.users?.role)) {
       return false
     }
     

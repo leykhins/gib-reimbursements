@@ -161,7 +161,7 @@
       isCompanyEvent: false,
       datePopoverOpen: false,
       liveOutStartDate: today(getLocalTimeZone()),
-      liveOutEndDate: today(getLocalTimeZone()),
+      liveOutEndDate: today(getLocalTimeZone()).add({ days: 1 }),
       liveOutStartDatePopoverOpen: false,
       liveOutEndDatePopoverOpen: false,
       mileageEntries: [{ 
@@ -346,6 +346,50 @@
     return `Live Out Allowance: ${nights} weekday night${nights === 1 ? '' : 's'} (${start} to ${end})`
   }
 
+  const ensureLiveOutEndAfterStart = (expense: any) => {
+    if (!expense.liveOutStartDate || !expense.liveOutEndDate) return
+    if (expense.liveOutEndDate.compare(expense.liveOutStartDate) <= 0) {
+      expense.liveOutEndDate = expense.liveOutStartDate.add({ days: 1 })
+    }
+  }
+
+  const validateLiveOutExpense = (expense: any): string | null => {
+    if (!isLiveOutAllowanceCategory(expense)) return null
+    if (!expense.liveOutStartDate || !expense.liveOutEndDate) {
+      return 'Live Out Allowance requires both start and end dates.'
+    }
+    if (expense.liveOutEndDate.compare(expense.liveOutStartDate) <= 0) {
+      return 'Live Out Allowance end date must be after the start date.'
+    }
+    const nights = getCappedLiveOutNights(expense)
+    const amount = parseFloat(expense.amount) || 0
+    if (nights <= 0 || amount <= 0) {
+      return 'Live Out Allowance must include at least one eligible weekday night.'
+    }
+    return null
+  }
+
+  const validateExpensesBeforeSubmit = (): string | null => {
+    for (const expense of expenses.value) {
+      const liveOutError = validateLiveOutExpense(expense)
+      if (liveOutError) return liveOutError
+    }
+    return null
+  }
+
+  const handleFormSubmit = () => {
+    const validationError = validateExpensesBeforeSubmit()
+    if (validationError) {
+      toast({
+        title: 'Validation Error',
+        description: validationError,
+        variant: 'destructive'
+      })
+      return
+    }
+    showConfirmModal.value = true
+  }
+
   const updateLiveOutAmount = (expenseId: number) => {
     const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
     if (expenseIndex === -1) return
@@ -353,6 +397,7 @@
     const expense = expenses.value[expenseIndex]
     if (!isLiveOutAllowanceCategory(expense)) return
 
+    ensureLiveOutEndAfterStart(expense)
     const cappedNights = getCappedLiveOutNights(expense)
     const amount = cappedNights * LIVE_OUT_NIGHT_RATE
 
@@ -487,7 +532,7 @@
       isCompanyEvent: false,
       datePopoverOpen: false,
       liveOutStartDate: previousExpense?.liveOutStartDate ?? lastSelectedDate.value,
-      liveOutEndDate: previousExpense?.liveOutEndDate ?? lastSelectedDate.value,
+      liveOutEndDate: previousExpense?.liveOutEndDate ?? (previousExpense?.liveOutStartDate ?? lastSelectedDate.value).add({ days: 1 }),
       liveOutStartDatePopoverOpen: false,
       liveOutEndDatePopoverOpen: false,
       mileageEntries: [{ 
@@ -716,6 +761,17 @@
   // Updated confirmSubmit function with address truncation
   const confirmSubmit = async () => {
     try {
+      const validationError = validateExpensesBeforeSubmit()
+      if (validationError) {
+        toast({
+          title: 'Validation Error',
+          description: validationError,
+          variant: 'destructive'
+        })
+        showConfirmModal.value = false
+        return
+      }
+
       loading.value = true;
       
       let allExpensesData = [];
@@ -780,6 +836,7 @@
         } else {
           // For non-mileage expenses, use the original logic
           if (isLiveOutAllowanceCategory(expense)) {
+            if (validateLiveOutExpense(expense)) return
             // Always regenerate hidden live-out description from selected dates.
             expense.description = buildLiveOutDescription(expense)
           }
@@ -1105,6 +1162,7 @@
       }
 
       if (categoryName.includes('live out allowance')) {
+        ensureLiveOutEndAfterStart(expenses.value[expenseIndex])
         updateLiveOutAmount(expenseId)
       }
     }
@@ -1502,7 +1560,7 @@
       <h1 class="text-responsive-xl font-bold">Add Expense</h1>
     </div>
 
-    <form @submit.prevent="showConfirmModal = true">
+    <form @submit.prevent="handleFormSubmit">
       <div v-if="error" class="bg-red-100 border border-red-400 text-red-600 px-4 py-3 rounded mb-4">
         {{ error }}
       </div>
@@ -1771,6 +1829,7 @@
                           initial-focus
                           @update:model-value="() => {
                             expense.liveOutStartDatePopoverOpen = false;
+                            ensureLiveOutEndAfterStart(expense);
                             updateLiveOutAmount(expense.id)
                           }"
                         />

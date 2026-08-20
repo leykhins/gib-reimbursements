@@ -32,6 +32,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getReceiptSignedUrl } from '~/lib/utils'
+import { skipsManagerApproval } from '~/lib/claimRouting'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 
@@ -261,7 +262,7 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
       .from('claims')
       .select(`
         *,
-        users:users!claims_employee_id_fkey(first_name, last_name, department),
+        users:users!claims_employee_id_fkey(first_name, last_name, department, role),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
@@ -622,7 +623,9 @@ const isEmployeeFullySelected = (employeeId) => {
 
 // Add this function to check if a request is actionable (admin_verified)
 const isRequestActionable = (request) => {
-  return request.status === 'admin_verified'
+  return request.status === 'verified'
+    && request.employee_id !== user.value?.id
+    && !skipsManagerApproval(request.users?.role)
 }
 
 // Update verify and reject functions to check if request is actionable
@@ -994,7 +997,7 @@ const getActionableClaimsCount = (category) => {
   let count = 0
   Object.values(category.jobGroups).forEach(jobGroup => {
     jobGroup.requests.forEach(request => {
-      if (request.status === 'admin_verified' || request.status === 'verified') {
+      if (request.status === 'verified' && isRequestActionable(request)) {
         count++
       }
     })

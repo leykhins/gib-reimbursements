@@ -32,12 +32,12 @@
   import { toast } from '@/components/ui/toast'
   import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
   import { getReceiptSignedUrl } from '~/lib/utils'
-import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimRouting'
+import { isReviewerQueueClaim } from '~/lib/claimRouting'
   import { Badge } from '@/components/ui/badge'
 
   definePageMeta({
-    layout: 'admin',
-    middleware: ['admin']
+    layout: 'reviewer',
+    middleware: ['reviewer']
   })
 
   // Use Supabase client and user
@@ -270,7 +270,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
         return false
       }
 
-      if (!isAdminQueueClaim(request)) {
+      if (!isReviewerQueueClaim(request)) {
         return false
       }
       
@@ -609,18 +609,10 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
           
           if (error) throw error
           
+          // Send notification
           try {
-            const { skipManagerIds } = splitFirstReviewNotificationIds(
-              reimbursementRequests.value,
-              [id]
-            )
-            if (skipManagerIds.length) {
-              const { sendEnhancedManagerApprovalEmail } = await import('~/lib/notifications')
-              await sendEnhancedManagerApprovalEmail(id)
-            } else {
-              const { sendEnhancedAdminVerificationEmail } = await import('~/lib/notifications')
-              await sendEnhancedAdminVerificationEmail(id)
-            }
+            const { sendEnhancedAdminVerificationEmail } = await import('~/lib/notifications')
+            await sendEnhancedAdminVerificationEmail(id)
           } catch (emailError) {
             console.error('Failed to send email notification:', emailError)
           }
@@ -949,7 +941,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
 <template>
   <div class="space-y-6">
     <div class="flex justify-between items-center">
-      <h1 class="text-xl font-bold">Overhead Reimbursements</h1>
+      <h1 class="text-xl font-bold">Job Reimbursements</h1>
     </div>
     
     <!-- Month navigation tabs -->
