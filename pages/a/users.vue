@@ -785,7 +785,9 @@ definePageMeta({
                   <span 
                     :class="[
                       'px-2 py-1 rounded-full text-xs font-medium capitalize',
-                      user.role === 'admin' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                      user.role === 'admin' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                      : user.role === 'reviewer' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+                      : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
                     ]"
                   >
                     {{ user.role }}
@@ -907,6 +909,7 @@ definePageMeta({
                 <SelectItem value="admin">Admin</SelectItem>
                 <SelectItem value="employee">Employee</SelectItem>
                 <SelectItem value="manager">Manager</SelectItem>
+                <SelectItem value="reviewer">Reviewer</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1013,6 +1016,7 @@ definePageMeta({
               <SelectItem value="admin">Admin</SelectItem>
               <SelectItem value="employee">Employee</SelectItem>
               <SelectItem value="manager">Manager</SelectItem>
+              <SelectItem value="reviewer">Reviewer</SelectItem>
             </SelectContent>
           </Select>
         </div>

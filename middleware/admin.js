@@ -40,7 +40,10 @@ export default defineNuxtRouteMiddleware(async (to) => {
     switch (data.role) {
       case 'manager':
         return navigateTo('/m/')
+      case 'reviewer':
+        return navigateTo('/r/')
       case 'accountant':
+      case 'accounting':
         return navigateTo('/f/')
       default:
         return navigateTo('/e/')

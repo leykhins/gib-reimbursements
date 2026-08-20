@@ -18,7 +18,7 @@
   import { Skeleton } from '@/components/ui/skeleton'
   import { toast } from '@/components/ui/toast'
   import { Button } from '@/components/ui/button'
-  import { isAdminQueueClaim } from '~/lib/claimRouting'
+  import { isReviewerQueueClaim } from '~/lib/claimRouting'
 
   const client = useSupabaseClient()
   const user = useSupabaseUser()
@@ -61,13 +61,13 @@
       
       if (error) throw error
       
-      isAdmin.value = data.role === 'admin'
+      isAdmin.value = data.role === 'reviewer' || data.role === 'admin'
       
       if (!isAdmin.value) {
         navigateTo('/e/')
         toast({
           title: 'Access Denied',
-          description: 'You do not have admin privileges',
+          description: 'You do not have reviewer privileges',
           variant: 'destructive'
         })
       }
@@ -103,7 +103,7 @@
         throw requestResponse.error;
       }
       
-      const requestData = (requestResponse.data || []).filter(isAdminQueueClaim);
+      const requestData = (requestResponse.data || []).filter(isReviewerQueueClaim);
       
       stats.value.totalRequests = requestData.length || 0
       stats.value.pendingRequests = requestData.filter(r => r.status === 'pending').length || 0
@@ -136,7 +136,7 @@
       }
       
       pendingRequests.value = (pendingResponse.data || [])
-        .filter(r => isAdminQueueClaim({ job_number: r.job_number, users: r.profiles }))
+        .filter(r => isReviewerQueueClaim({ job_number: r.job_number, users: r.profiles }))
         .slice(0, 5)
       
     } catch (error) {
@@ -173,8 +173,8 @@
   })
 
   definePageMeta({
-    layout: 'admin',
-    middleware: ['auth', 'admin']
+    layout: 'reviewer',
+    middleware: ['auth', 'reviewer']
   })
 </script>
 
@@ -351,7 +351,7 @@
                       </span>
                     </TableCell>
                     <TableCell class="py-3">
-                      <Button size="sm" variant="outline" @click="router.push(`/a/pending?id=${request.id}`)" class="h-7 text-xs">
+                      <Button size="sm" variant="outline" @click="router.push(`/r/pending?id=${request.id}`)" class="h-7 text-xs">
                         Review
                       </Button>
                     </TableCell>
@@ -360,7 +360,7 @@
               </Table>
               
               <div class="flex justify-end mt-4">
-                <Button variant="outline" size="sm" @click="router.push('/a/pending')" class="text-xs">
+                <Button variant="outline" size="sm" @click="router.push('/r/pending')" class="text-xs">
                   View All Requests
                 </Button>
               </div>

@@ -25,7 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getReceiptSignedUrl } from '~/lib/utils'
-import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimRouting'
+import { isReviewerQueueClaim } from '~/lib/claimRouting'
 import {
   Tooltip,
   TooltipContent,
@@ -34,8 +34,8 @@ import {
 } from '@/components/ui/tooltip'
 
 definePageMeta({
-  layout: 'admin',
-  middleware: ['admin']
+  layout: 'reviewer',
+  middleware: ['reviewer']
 })
 
 // Use Supabase client and user
@@ -111,14 +111,14 @@ const fetchAvailableYears = async () => {
   try {
     const { data, error } = await client
       .from('claims')
-      .select('date, status, job_number, users:users!claims_employee_id_fkey(role)')
+      .select('date, job_number, users:users!claims_employee_id_fkey(role)')
       .eq('status', 'pending')
     
     if (error) throw error
     
     // Extract unique years from claims
     const uniqueYears = new Set(
-      data.filter(isAdminQueueClaim).map(claim => new Date(claim.date).getFullYear())
+      data.filter(isReviewerQueueClaim).map(claim => new Date(claim.date).getFullYear())
     )
     
     // Add current year if not present
@@ -260,8 +260,8 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
 // Apply filters to reimbursement requests
 const applyFilters = () => {
   filteredRequests.value = reimbursementRequests.value.filter(request => {
-    // Only show pending overhead / leadership-submitted requests
-    if (request.status !== 'pending' || !isAdminQueueClaim(request)) {
+    // Only show pending job-number requests
+    if (request.status !== 'pending' || !isReviewerQueueClaim(request)) {
       return false
     }
     
@@ -608,28 +608,14 @@ const confirmVerification = async () => {
     
     await Promise.all(promises)
     
+    // Send notifications - consolidated if multiple, individual if single
     try {
-      const { skipManagerIds, managerReviewIds } = splitFirstReviewNotificationIds(
-        reimbursementRequests.value,
-        verifyingRequests.value
-      )
-      const {
-        sendConsolidatedAdminVerificationEmail,
-        sendEnhancedAdminVerificationEmail,
-        sendConsolidatedManagerApprovalEmail,
-        sendEnhancedManagerApprovalEmail
-      } = await import('~/lib/notifications')
-
-      if (managerReviewIds.length > 1) {
-        await sendConsolidatedAdminVerificationEmail(managerReviewIds)
-      } else if (managerReviewIds.length === 1) {
-        await sendEnhancedAdminVerificationEmail(managerReviewIds[0])
-      }
-
-      if (skipManagerIds.length > 1) {
-        await sendConsolidatedManagerApprovalEmail(skipManagerIds)
-      } else if (skipManagerIds.length === 1) {
-        await sendEnhancedManagerApprovalEmail(skipManagerIds[0])
+      if (verifyingRequests.value.length > 1) {
+        const { sendConsolidatedAdminVerificationEmail } = await import('~/lib/notifications')
+        await sendConsolidatedAdminVerificationEmail(verifyingRequests.value)
+      } else {
+        const { sendEnhancedAdminVerificationEmail } = await import('~/lib/notifications')
+        await sendEnhancedAdminVerificationEmail(verifyingRequests.value[0])
       }
     } catch (emailError) {
       console.error('Failed to send email notification:', emailError)
@@ -686,7 +672,7 @@ const fetchMonthlyStatusIndicators = async () => {
     
     // Process the status data - parse date string directly to avoid timezone issues
     if (data) {
-      data.filter(isAdminQueueClaim).forEach(claim => {
+      data.filter(isReviewerQueueClaim).forEach(claim => {
         // Parse date string directly (YYYY-MM-DD format)
         const dateParts = claim.date.split('-')
         if (dateParts.length === 3) {
@@ -919,7 +905,7 @@ const getActionableClaimsCount = (category) => {
 <template>
   <div class="space-y-6">
     <div class="flex justify-between items-center">
-      <h1 class="text-xl font-bold">Pending Overhead Reimbursements</h1>
+      <h1 class="text-xl font-bold">Pending Job Reimbursements</h1>
     </div>
     
     <!-- Month navigation tabs -->

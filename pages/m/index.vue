@@ -6,6 +6,7 @@ import { DollarSign, Clock, CheckCircle, FileText, XCircle } from 'lucide-vue-ne
 import { BarChart } from '@/components/ui/chart-bar'
 import { Table, TableHeader, TableBody, TableCell, TableRow, TableHead } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
+import { skipsManagerApproval } from '~/lib/claimRouting'
 
 definePageMeta({
   layout: 'manager',
@@ -243,7 +244,7 @@ const fetchRecentRequests = async (department) => {
       is_travel,
       start_location,
       destination,
-      users!claims_employee_id_fkey(first_name, last_name, department),
+      users!claims_employee_id_fkey(first_name, last_name, department, role),
       claim_categories:category_id(category_name),
       category_subcategory_mapping:subcategory_mapping_id(
         id,
@@ -256,7 +257,9 @@ const fetchRecentRequests = async (department) => {
     .limit(5)
   
   if (error) throw error
-  return data
+  return (data || []).filter(claim =>
+    claim.employee_id !== user.value?.id && !skipsManagerApproval(claim.users?.role)
+  )
 }
 
 

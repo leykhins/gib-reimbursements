@@ -92,6 +92,14 @@ const getDashboardItems = () => {
       available: true
     })
   }
+
+  if (profile.value.role === 'admin' || profile.value.role === 'reviewer') {
+    items.push({
+      label: 'Reviewer Dashboard',
+      prefix: 'r',
+      available: true
+    })
+  }
   
   if (profile.value.role === 'admin' || profile.value.role === 'accounting') {
     items.push({
