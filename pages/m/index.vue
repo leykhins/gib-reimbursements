@@ -7,6 +7,7 @@ import { BarChart } from '@/components/ui/chart-bar'
 import { Table, TableHeader, TableBody, TableCell, TableRow, TableHead } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
 import { skipsManagerApproval } from '~/lib/claimRouting'
+import { parseLocalDateString } from '~/lib/utils'
 
 definePageMeta({
   layout: 'manager',
@@ -180,7 +181,7 @@ const formatCurrency = (amount) => {
 
 // Format date
 const formatDate = (dateString) => {
-  return new Date(dateString).toLocaleDateString('en-US', {
+  return parseLocalDateString(dateString).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'

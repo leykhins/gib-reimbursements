@@ -11,6 +11,7 @@
   import { format } from 'date-fns'
   import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
   import { cn } from '@/lib/utils'
+  import { parseLocalDateString } from '~/lib/utils'
   import { Skeleton } from '@/components/ui/skeleton'
   import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
   import { Toaster } from '@/components/ui/toast'
@@ -366,7 +367,7 @@
         claim.category_id === categoryFilter.value
       
       const matchesDate = !dateFilter.value || 
-        format(new Date(claim.date), 'yyyy-MM') === dateFilter.value
+        format(parseLocalDateString(claim.date), 'yyyy-MM') === dateFilter.value
       
       return matchesSearch && matchesCategory && matchesDate
     })
@@ -636,7 +637,7 @@
 
   // Format date
   const formatDate = (dateString: string) => {
-    return format(new Date(dateString), 'PPP')
+    return format(parseLocalDateString(dateString), 'PPP')
   }
 
   // Get status badge class
