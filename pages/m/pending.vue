@@ -26,7 +26,7 @@ import { format, addDays, endOfMonth, endOfDay, isAfter } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { getReceiptSignedUrl } from '~/lib/utils'
+import { getReceiptSignedUrl, parseLocalDateString } from '~/lib/utils'
 import { skipsManagerApproval } from '~/lib/claimRouting'
 
 definePageMeta({
@@ -136,7 +136,7 @@ const fetchAvailableYears = async () => {
     
     // Extract unique years from claims
     const uniqueYears = new Set(
-      data.map(claim => new Date(claim.date).getFullYear())
+      data.map(claim => parseLocalDateString(claim.date).getFullYear())
     )
     
     // Add current year if not present
@@ -317,7 +317,7 @@ const applyFilters = () => {
       return false
     }
     
-    const requestDate = new Date(request.date)
+    const requestDate = parseLocalDateString(request.date)
     const requestMonth = requestDate.getMonth()
     const requestYear = requestDate.getFullYear()
     
@@ -485,13 +485,17 @@ const formatDate = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy')
 }
 
+const formatClaimDate = (dateString) => {
+  return format(parseLocalDateString(dateString), 'MMM d, yyyy')
+}
+
 const formatDateTime = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy h:mm a')
 }
 
 const isLateSubmission = (expenseDate, submittedAt) => {
   if (!expenseDate || !submittedAt) return false
-  const deadline = endOfDay(addDays(endOfMonth(new Date(expenseDate)), 7))
+  const deadline = endOfDay(addDays(endOfMonth(parseLocalDateString(expenseDate)), 7))
   return isAfter(new Date(submittedAt), deadline)
 }
 
@@ -550,7 +554,7 @@ const changeMonth = (newMonth) => {
   
   // Check if we already have data for this month/year
   const hasDataForMonth = reimbursementRequests.value.some(request => {
-    const requestDate = new Date(request.date)
+    const requestDate = parseLocalDateString(request.date)
     return requestDate.getMonth() === newMonth && requestDate.getFullYear() === selectedYear.value
   })
   
@@ -571,7 +575,7 @@ const changeYear = (newYear) => {
   
   // Check if we already have data for this year
   const hasDataForYear = reimbursementRequests.value.some(request => {
-    const requestDate = new Date(request.date)
+    const requestDate = parseLocalDateString(request.date)
     return requestDate.getFullYear() === newYear
   })
   
@@ -1333,7 +1337,7 @@ onMounted(async () => {
                                     class="white-checkbox"
                                   />
                                 </TableCell>
-                                <TableCell class="py-2 text-sm">{{ formatDate(request.date) }}</TableCell>
+                                <TableCell class="py-2 text-sm">{{ formatClaimDate(request.date) }}</TableCell>
                                 <TableCell class="py-2 text-sm">
                                   <div class="flex items-center gap-2">
                                     <span>{{ formatDateTime(request.created_at) }}</span>

@@ -6,6 +6,7 @@
   import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
   import { toast } from '@/components/ui/toast'
   import { Skeleton } from '@/components/ui/skeleton'
+  import { parseLocalDateString } from '~/lib/utils'
   
   definePageMeta({
     layout: 'accounting',
@@ -152,7 +153,7 @@
   
   // Format date
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-CA', {
+    return parseLocalDateString(dateString).toLocaleDateString('en-CA', {
       year: 'numeric',
       month: 'short',
       day: 'numeric'

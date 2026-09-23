@@ -283,7 +283,7 @@ const formatCurrency = (amount) => {
 }
 
 const formatDate = (dateString) => {
-  return format(new Date(dateString), 'MMM d, yyyy')
+  return format(parseLocalDateString(dateString), 'MMM d, yyyy')
 }
 
 const formatDateTime = (dateString) => {

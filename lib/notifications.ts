@@ -1,3 +1,4 @@
+import { parseLocalDateString } from './utils'
 import { createClient } from '@supabase/supabase-js'
 import { emailRateLimiter } from './rateLimiter'
 import { isReviewerQueueClaim } from './claimRouting'
@@ -16,7 +17,8 @@ export const formatCurrency = (amount: number | string | null | undefined): stri
  * Formats a date to a readable format
  */
 export const formatDate = (dateString: string | Date): string => {
-  return new Date(dateString).toLocaleDateString('en-US', {
+  const date = typeof dateString === 'string' ? parseLocalDateString(dateString) : dateString
+  return date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
