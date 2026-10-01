@@ -592,6 +592,16 @@
     }
   }
 
+  // Receipts must be an image or PDF (blocks .msg, .eml, Office docs, etc.)
+  const assertReceiptFileType = (file: File) => {
+    const name = file.name.toLowerCase()
+    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/.test(name)
+    const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf')
+    if (!isImage && !isPdf) {
+      throw new Error('Receipts must be an image or PDF file.')
+    }
+  }
+
   // Add this helper function to convert HEIC files
   const convertHeicToJpeg = async (file: File): Promise<File> => {
     if (file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
@@ -635,14 +645,16 @@
       const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
       if (expenseIndex !== -1) {
         try {
+          assertReceiptFileType(input.files[0])
           // Convert HEIC to JPEG if needed
           const convertedFile = await convertHeicToJpeg(input.files[0])
           expenses.value[expenseIndex].receipt = convertedFile
-          
+
           // Start upload immediately
           await uploadFile(convertedFile, expenseId)
-        } catch (error) {
-          error.value = error.message
+        } catch (e: any) {
+          error.value = e?.message || 'Failed to upload file'
+          input.value = ''
         }
       }
     }
@@ -1338,12 +1350,13 @@
       const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
       if (expenseIndex !== -1) {
         try {
+          assertReceiptFileType(file)
           // Convert HEIC to JPEG if needed
           const convertedFile = await convertHeicToJpeg(file)
           expenses.value[expenseIndex].receipt = convertedFile
           await uploadFile(convertedFile, expenseId)
-        } catch (error) {
-          error.value = error.message
+        } catch (e: any) {
+          error.value = e?.message || 'Failed to upload file'
         }
       }
     }
@@ -1464,11 +1477,13 @@
       const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
       if (expenseIndex !== -1) {
         try {
+          assertReceiptFileType(input.files[0])
           const convertedFile = await convertHeicToJpeg(input.files[0])
           expenses.value[expenseIndex].receiptTwo = convertedFile
           await uploadSecondFile(convertedFile, expenseId)
         } catch (e: any) {
           error.value = e?.message || 'Failed to upload second file'
+          input.value = ''
         }
       }
     }
@@ -1539,6 +1554,7 @@
       const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
       if (expenseIndex !== -1) {
         try {
+          assertReceiptFileType(file)
           const convertedFile = await convertHeicToJpeg(file)
           expenses.value[expenseIndex].receiptTwo = convertedFile
           await uploadSecondFile(convertedFile, expenseId)
