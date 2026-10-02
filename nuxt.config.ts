@@ -21,7 +21,7 @@ export default defineNuxtConfig({
   vite: {
     optimizeDeps: {
       include: ['cookie'],
-      exclude: ['heic2any']
+      exclude: ['heic-to']
     },
     define: {
       global: 'globalThis'

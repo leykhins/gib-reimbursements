@@ -44,7 +44,7 @@
   const { toast } = useToast() // Change this line to destructure toast
   const loading = ref(false)
   const error = ref('')
-  const uploadStatus = ref<Record<number, 'idle' | 'uploading' | 'success' | 'error'>>({})
+  const uploadStatus = ref<Record<number, 'idle' | 'converting' | 'uploading' | 'success' | 'error'>>({})
   const uploadProgress = ref<Record<number, number>>({})
   const receiptUrls = ref<Record<number, string>>({})
   const receiptPaths = ref<Record<number, string>>({})
@@ -603,31 +603,33 @@
   }
 
   // Add this helper function to convert HEIC files
-  const convertHeicToJpeg = async (file: File): Promise<File> => {
+  const convertHeicToJpeg = async (file: File, expenseId: number): Promise<File> => {
     if (file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
       // Only run on client side
       if (typeof window !== 'undefined') {
+        uploadStatus.value[expenseId] = 'converting'
         try {
-          // Dynamically import heic2any only when needed
-          const { default: heic2any } = await import('heic2any')
-          
-          const convertedBlob = await heic2any({
+          // Dynamically import heic-to only when needed
+          const { heicTo } = await import('heic-to')
+
+          const convertedBlob = await heicTo({
             blob: file,
-            toType: 'image/jpeg',
+            type: 'image/jpeg',
             quality: 0.8
           })
-          
+
           // Create a new File object with the converted blob
           const convertedFile = new File(
-            [convertedBlob as Blob], 
+            [convertedBlob],
             file.name.replace(/\.(heic|heif)$/i, '.jpg'),
             { type: 'image/jpeg' }
           )
-          
+
           return convertedFile
         } catch (error) {
           console.error('Error converting HEIC file:', error)
-          throw new Error('Failed to convert HEIC file. Please try again.')
+          uploadStatus.value[expenseId] = 'error'
+          throw new Error('Failed to convert HEIC file. Please try again or upload a JPG or PDF instead.')
         }
       } else {
         // On server side, just return the original file
@@ -647,7 +649,7 @@
         try {
           assertReceiptFileType(input.files[0])
           // Convert HEIC to JPEG if needed
-          const convertedFile = await convertHeicToJpeg(input.files[0])
+          const convertedFile = await convertHeicToJpeg(input.files[0], expenseId)
           expenses.value[expenseIndex].receipt = convertedFile
 
           // Start upload immediately
@@ -1352,7 +1354,7 @@
         try {
           assertReceiptFileType(file)
           // Convert HEIC to JPEG if needed
-          const convertedFile = await convertHeicToJpeg(file)
+          const convertedFile = await convertHeicToJpeg(file, expenseId)
           expenses.value[expenseIndex].receipt = convertedFile
           await uploadFile(convertedFile, expenseId)
         } catch (e: any) {
@@ -1478,7 +1480,7 @@
       if (expenseIndex !== -1) {
         try {
           assertReceiptFileType(input.files[0])
-          const convertedFile = await convertHeicToJpeg(input.files[0])
+          const convertedFile = await convertHeicToJpeg(input.files[0], expenseId)
           expenses.value[expenseIndex].receiptTwo = convertedFile
           await uploadSecondFile(convertedFile, expenseId)
         } catch (e: any) {
@@ -1555,7 +1557,7 @@
       if (expenseIndex !== -1) {
         try {
           assertReceiptFileType(file)
-          const convertedFile = await convertHeicToJpeg(file)
+          const convertedFile = await convertHeicToJpeg(file, expenseId)
           expenses.value[expenseIndex].receiptTwo = convertedFile
           await uploadSecondFile(convertedFile, expenseId)
         } catch (e: any) {
@@ -2203,12 +2205,23 @@
                     <div class="flex flex-col items-center justify-center">
                       <Upload class="h-8 w-8 mb-2" :class="isDragging[expense.id] ? 'text-primary' : 'text-gray-400'" />
                       <p class="text-responsive-sm font-medium">
-                        {{ isDragging[expense.id] ? 'Drop file here' : uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click or drag file here' }}
+                        {{ isDragging[expense.id] ? 'Drop file here' : uploadStatus[expense.id] === 'converting' ? 'Converting HEIC to JPG...' : uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click or drag file here' }}
                       </p>
                       <p class="text-responsive-xs text-gray-500 mt-1">
                         JPG, PNG or PDF (max. 10MB)
                       </p>
                       
+                      <!-- Conversion status for upload -->
+                      <div v-if="uploadStatus[expense.id] === 'converting'" class="w-full mt-2">
+                        <div class="bg-gray-200 rounded-full h-2.5 w-full">
+                          <div class="bg-blue-600 h-2.5 rounded-full w-full animate-pulse"></div>
+                        </div>
+                        <p class="flex items-center justify-center text-responsive-xs text-gray-500 mt-1">
+                          <LoaderCircle class="h-3 w-3 mr-1 animate-spin" />
+                          Converting...
+                        </p>
+                      </div>
+
                       <!-- Progress bar for upload -->
                       <div v-if="uploadStatus[expense.id] === 'uploading'" class="w-full mt-2">
                         <div class="bg-gray-200 rounded-full h-2.5 w-full">
@@ -2282,12 +2295,23 @@
                         <div class="flex flex-col items-center justify-center">
                           <Upload class="h-8 w-8 mb-2" :class="isDragging[expense.id] ? 'text-primary' : 'text-gray-400'" />
                           <p class="text-responsive-sm font-medium">
-                            {{ isDragging[expense.id] ? 'Drop second receipt here' : 'Click or drag second receipt here' }}
+                            {{ isDragging[expense.id] ? 'Drop second receipt here' : uploadStatus[expense.id] === 'converting' ? 'Converting HEIC to JPG...' : uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click or drag second receipt here' }}
                           </p>
                           <p class="text-responsive-xs text-gray-500 mt-1">
                             JPG, PNG or PDF (max. 10MB)
                           </p>
                           
+                          <!-- Conversion status for second upload -->
+                          <div v-if="uploadStatus[expense.id] === 'converting'" class="w-full mt-2">
+                            <div class="bg-gray-200 rounded-full h-2.5 w-full">
+                              <div class="bg-blue-600 h-2.5 rounded-full w-full animate-pulse"></div>
+                            </div>
+                            <p class="flex items-center justify-center text-responsive-xs text-gray-500 mt-1">
+                              <LoaderCircle class="h-3 w-3 mr-1 animate-spin" />
+                              Converting...
+                            </p>
+                          </div>
+
                           <!-- Progress bar for second upload -->
                           <div v-if="uploadStatus[expense.id] === 'uploading'" class="w-full mt-2">
                             <div class="bg-gray-200 rounded-full h-2.5 w-full">
