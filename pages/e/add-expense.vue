@@ -1153,10 +1153,10 @@
     }, 0).toFixed(2)
   })
 
-  // Add function to calculate GST for parking expenses
+  // Parking receipts show a GST-inclusive total, so the GST is the 5% inside it.
   const calculateParkingGST = (amount: string): string => {
     if (!amount || isNaN(parseFloat(amount))) return '0.00'
-    return ((parseFloat(amount) / 1.29) * 0.05).toFixed(2)
+    return ((parseFloat(amount) / 1.05) * 0.05).toFixed(2)
   }
 
   // Update the handleCategoryChange function to calculate GST for parking
