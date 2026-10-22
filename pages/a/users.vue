@@ -927,6 +927,7 @@ definePageMeta({
                 <SelectItem value="Project Management">Project Management</SelectItem>
                 <SelectItem value="Sales/Marketing">Sales/Marketing</SelectItem>
                 <SelectItem value="Finance">Finance</SelectItem>
+                <SelectItem value="rsm">RSM</SelectItem>
               </SelectContent>
             </Select>
           </div>
