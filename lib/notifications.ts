@@ -93,13 +93,13 @@ export const getClaimDetailsForEmail = async (
         id,
         claim_subcategories:subcategory_id(subcategory_name)
       ),
-      users!claims_employee_id_fkey(first_name, last_name, email, role)
+      users!claims_employee_id_fkey(first_name, last_name, email, role, department)
     `)
     .eq('id', claimId)
     .single()
-  
+
   if (error) throw error
-  
+
   return {
     claimData: {
       id: data.id,
@@ -116,7 +116,8 @@ export const getClaimDetailsForEmail = async (
       firstName: data.users.first_name,
       lastName: data.users.last_name,
       fullName: `${data.users.first_name} ${data.users.last_name}`,
-      role: data.users.role
+      role: data.users.role,
+      department: data.users.department
     }
   }
 }
@@ -319,8 +320,8 @@ export const getAllReviewerDetails = async (client: any) => {
   }))
 }
 
-const getFirstReviewRecipients = async (client: any, claimData: { job_number?: string | null }, userData: { role?: string | null }) => {
-  if (isReviewerQueueClaim({ job_number: claimData.job_number, users: { role: userData.role } })) {
+const getFirstReviewRecipients = async (client: any, claimData: { job_number?: string | null }, userData: { role?: string | null, department?: string | null }) => {
+  if (isReviewerQueueClaim({ job_number: claimData.job_number, users: { role: userData.role, department: userData.department } })) {
     const reviewers = await getAllReviewerDetails(client)
     if (reviewers.length) return reviewers
   }
@@ -1098,10 +1099,10 @@ export const sendEnhancedConsolidatedClaimSubmissionEmail = async (
     const claimsDetails = await Promise.all(claimsPromises)
 
     const reviewerGroup = claimsDetails.filter(({ claimData, userData }) =>
-      isReviewerQueueClaim({ job_number: claimData.job_number, users: { role: userData.role } })
+      isReviewerQueueClaim({ job_number: claimData.job_number, users: { role: userData.role, department: userData.department } })
     )
     const adminGroup = claimsDetails.filter(({ claimData, userData }) =>
-      !isReviewerQueueClaim({ job_number: claimData.job_number, users: { role: userData.role } })
+      !isReviewerQueueClaim({ job_number: claimData.job_number, users: { role: userData.role, department: userData.department } })
     )
     
     // Calculate total amount
