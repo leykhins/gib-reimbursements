@@ -111,7 +111,7 @@ const fetchAvailableYears = async () => {
   try {
     const { data, error } = await client
       .from('claims')
-      .select('date, job_number, users:users!claims_employee_id_fkey(role)')
+      .select('date, job_number, users:users!claims_employee_id_fkey(role, department)')
       .eq('status', 'pending')
     
     if (error) throw error
@@ -661,7 +661,7 @@ const fetchMonthlyStatusIndicators = async () => {
     // Fetch only date and status for pending claims in this year
     const { data, error } = await client
       .from('claims')
-      .select('date, status, job_number, users:users!claims_employee_id_fkey(role)')
+      .select('date, status, job_number, users:users!claims_employee_id_fkey(role, department)')
       .eq('status', 'pending')
       .gte('date', startDateStr)
       .lt('date', endDateStr)

@@ -97,7 +97,7 @@
       // Fetch reimbursement request stats
       const requestResponse = await client
         .from('claims')
-        .select('status, job_number, users:users!claims_employee_id_fkey(role)')
+        .select('status, job_number, users:users!claims_employee_id_fkey(role, department)')
       
       if (requestResponse.error) {
         throw requestResponse.error;
@@ -125,7 +125,7 @@
             id,
             claim_subcategories:subcategory_id(subcategory_name)
           ),
-          profiles:employee_id(first_name, last_name, email, role)
+          profiles:employee_id(first_name, last_name, email, role, department)
         `)
         .eq('status', 'pending')
         .order('created_at', { ascending: false })

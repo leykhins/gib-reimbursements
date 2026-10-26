@@ -6,6 +6,10 @@ export function skipsManagerApproval(role?: string | null): boolean {
   return role === 'manager' || role === 'admin'
 }
 
+export function isRsmDepartment(department?: string | null): boolean {
+  return (department ?? '').trim().toLowerCase() === 'rsm'
+}
+
 export function splitFirstReviewNotificationIds(
   claims: Array<{ id: string, users?: { role?: string | null } | null }>,
   ids: string[]
@@ -25,18 +29,20 @@ export function splitFirstReviewNotificationIds(
   return { skipManagerIds, managerReviewIds }
 }
 
-/** Job-number claims from non-leadership staff go to the reviewer. */
+/** Job-number claims from non-leadership, non-RSM staff go to the reviewer. */
 export function isReviewerQueueClaim(claim: {
   job_number?: string | null
-  users?: { role?: string | null } | null
+  users?: { role?: string | null, department?: string | null } | null
 }): boolean {
-  return hasJobNumber(claim.job_number) && !skipsManagerApproval(claim.users?.role)
+  return hasJobNumber(claim.job_number)
+    && !skipsManagerApproval(claim.users?.role)
+    && !isRsmDepartment(claim.users?.department)
 }
 
-/** Overhead claims and leadership-submitted claims go to admin. */
+/** Overhead claims, leadership-submitted claims, and RSM department claims go to admin. */
 export function isAdminQueueClaim(claim: {
   job_number?: string | null
-  users?: { role?: string | null } | null
+  users?: { role?: string | null, department?: string | null } | null
 }): boolean {
   return !isReviewerQueueClaim(claim)
 }
