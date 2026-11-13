@@ -144,3 +144,19 @@ export function mergeMonthlyClaimStatus(
 
   return status
 }
+export interface WaitingMonth { year: number; month: number; count: number }
+
+/**
+ * Counts claims by month, oldest first, for the queue pages' "Waiting in"
+ * strip. `month` is 0-based to match the pages' month tabs.
+ */
+export function countWaitingMonths(claims: Array<{ date: string }>): WaitingMonth[] {
+  const counts = new Map<string, number>()
+  for (const claim of claims) {
+    const period = claim.date?.slice(0, 7)
+    if (period && /^\d{4}-\d{2}$/.test(period)) counts.set(period, (counts.get(period) || 0) + 1)
+  }
+  return [...counts]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([period, count]) => ({ year: Number(period.slice(0, 4)), month: Number(period.slice(5, 7)) - 1, count }))
+}

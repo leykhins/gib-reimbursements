@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { countWaitingMonths, type WaitingMonth } from '~/lib/utils'
+import WaitingMonths from '~/components/WaitingMonths.vue'
 import { claimantName } from '~/lib/queueStats'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -785,7 +787,18 @@ const confirmRejection = async () => {
 // Add a new ref to store monthly status indicators separately
 const monthlyStatusIndicators = ref({})
 
-// Fetch monthly status indicators for all months in the selected year
+// Every month with claims waiting, across years (see WaitingMonths.vue)
+const waitingMonths = ref<WaitingMonth[]>([])
+
+const goToMonth = async (year: number, month: number) => {
+  const yearChanged = year !== selectedYear.value
+  selectedYear.value = year
+  selectedMonth.value = month
+  if (yearChanged) fetchMonthlyStatusIndicators()
+  await fetchReimbursementRequests()
+}
+
+// The month dots for the selected year, plus the Waiting in strip
 const fetchMonthlyStatusIndicators = async () => {
   try {
     // First get the manager's department if not already set
@@ -813,18 +826,12 @@ const fetchMonthlyStatusIndicators = async () => {
     const employeeIds = departmentEmployees?.map(emp => emp.id) || []
     if (employeeIds.length === 0) return
     
-    // Calculate date range for the entire year
-    const startDateStr = `${selectedYear.value}-01-01`
-    const endDateStr = `${selectedYear.value + 1}-01-01`
-    
-    // Fetch only date and status for verified claims in this year
+    // Fetch only date and status for verified claims in every year, for the dots and the Waiting in strip
     const { data, error } = await client
       .from('claims')
       .select('date, status')
       .eq('status', 'verified')
       .in('employee_id', employeeIds)
-      .gte('date', startDateStr)
-      .lt('date', endDateStr)
     
     if (error) throw error
     
@@ -851,6 +858,7 @@ const fetchMonthlyStatusIndicators = async () => {
     }
     
     monthlyStatusIndicators.value = status
+    waitingMonths.value = countWaitingMonths(data || [])
   } catch (err) {
     console.error('Error fetching monthly status indicators:', err)
   }
@@ -1013,7 +1021,7 @@ onMounted(async () => {
     <!-- Month navigation tabs -->
     <div class="flex flex-col lg:flex-row items-stretch lg:items-center text-responsive-base gap-2">
       <div class="w-full bg-white lg:w-32 text-sm">
-        <Select v-model="selectedYear">
+        <Select :model-value="selectedYear" @update:model-value="(value) => changeYear(Number(value))">
           <SelectTrigger class="h-8 w-full">
             <div class="flex items-center">
               <CalendarIcon class="w-4 h-4 mr-2" />
@@ -1079,6 +1087,8 @@ onMounted(async () => {
       </div>
     </div>
     
+    <WaitingMonths :months="waitingMonths" :year="selectedYear" :month="selectedMonth" @select="goToMonth" />
+
     <!-- Border under months -->
     <div class="h-px w-full bg-border"></div>
 
