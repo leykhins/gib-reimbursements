@@ -7,7 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Check, MessageSquare, X } from 'lucide-vue-next'
+import { Check, MessageSquare, Pencil, X } from 'lucide-vue-next'
+import ClaimCorrectionDialog from '~/components/ClaimCorrectionDialog.vue'
+import { correctionAccess } from '~/lib/claimCorrection'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 
@@ -89,6 +91,18 @@ const noteDialogOpen = ref(false)
 const newNote = ref('')
 const selectedClaim = ref(null)
 const userRole = ref('')
+
+// Corrections go through correct_claim(), which writes the change and the reason as a note.
+const correctingClaim = ref<any>(null)
+const canCorrect = (request) => correctionAccess(request, userRole.value, user.value?.id, null) === 'edit'
+const onCorrected = async (movedTo: string | null) => {
+  correctingClaim.value = null
+  toast({
+    title: 'Claim corrected',
+    description: movedTo ? 'The claim moved to another month. The change is saved as a note.' : 'The change is saved as a note on the claim.'
+  })
+  await Promise.all([fetchReimbursementRequests(), fetchMonthlyStatusIndicators()])
+}
 const verifyingRequestIds = ref(new Set())
 const isVerifying = ref(false)
 const isRejecting = ref(false)
@@ -214,6 +228,7 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
           id,
           note,
           role,
+          kind,
           created_at,
           user_id
         )
@@ -1274,8 +1289,8 @@ onMounted(async () => {
                                 </TableCell>
                                 <TableCell class="py-2">
                                   <div v-if="request.notes && request.notes.length > 0" class="space-y-1">
-                                    <div v-for="note in request.notes" :key="note.id" class="text-sm">
-                                      <span class="font-medium">{{ note.role }}:</span> {{ note.note }}
+                                    <div v-for="note in request.notes" :key="note.id" :class="['text-sm', note.kind === 'correction' && 'rounded border border-orange-200 bg-orange-50 px-2 py-1']">
+                                      <span class="font-medium capitalize">{{ note.role }}<template v-if="note.kind === 'correction'"> correction</template>:</span> {{ note.note }}
                                       <span class="text-xs text-muted-foreground ml-2">
                                         {{ formatDate(note.created_at) }}
                                       </span>
@@ -1301,6 +1316,16 @@ onMounted(async () => {
                                       title="Add Note"
                                     >
                                       <MessageSquare class="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      v-if="canCorrect(request)"
+                                      variant="outline"
+                                      size="sm"
+                                      class="h-7 w-7 p-0 rounded-md bg-secondary text-white hover:bg-orange-700"
+                                      @click="correctingClaim = request"
+                                      title="Correct details"
+                                    >
+                                      <Pencil class="h-4 w-4" />
                                     </Button>
                                     <Button 
                                       v-if="request.status === 'approved'"
@@ -1441,6 +1466,9 @@ onMounted(async () => {
         </div>
       </DialogContent>
     </Dialog>
+
+    <!-- Correction Dialog -->
+    <ClaimCorrectionDialog :claim="correctingClaim" @close="correctingClaim = null" @saved="onCorrected" />
 
     <!-- Note Dialog -->
     <Dialog v-model:open="noteDialogOpen">
