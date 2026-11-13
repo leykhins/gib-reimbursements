@@ -124,7 +124,7 @@ const fetchAvailableYears = async () => {
     
     const { data, error } = await client
       .from('claims')
-      .select('date, users:employee_id(department)')
+      .select('date, users:employee_id!inner(department)')
       // Use the global ref's value here
       .eq('users.department', managerDepartment.value)
     
