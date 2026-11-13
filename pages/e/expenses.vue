@@ -484,40 +484,6 @@ const isEmployeeFullySelected = (employeeId) => {
          pendingRequests.every(id => selectedRequests.value.has(id))
 }
 
-const verifySelectedRequests = async () => {
-  try {
-    const promises = Array.from(selectedRequests.value).map(requestId => 
-      client
-        .from('claims')
-        .update({
-          status: 'admin_verified',
-          admin_verified_by: user.value.id,
-          admin_verified_at: new Date().toISOString()
-        })
-        .eq('id', requestId)
-    )
-    
-    await Promise.all(promises)
-    
-    toast({
-      title: 'Success',
-      description: 'Selected requests verified successfully',
-      variant: 'default'
-    })
-    
-    // Refresh the list and clear selections
-    selectedRequests.value.clear()
-    await fetchReimbursementRequests()
-  } catch (err) {
-    console.error('Error verifying requests:', err)
-    toast({
-      title: 'Error',
-      description: 'Failed to verify some requests',
-      variant: 'destructive'
-    })
-  }
-}
-
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
   try {
