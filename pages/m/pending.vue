@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { claimantName } from '~/lib/queueStats'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
@@ -251,7 +252,7 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
       .from('claims')
       .select(`
         *,
-        users:users!claims_employee_id_fkey(first_name, last_name, department, role),
+        users:users!claims_employee_id_fkey(first_name, last_name, email, department, role),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
@@ -333,7 +334,7 @@ const applyFilters = () => {
     
     // Employee name filter
     if (filters.value.employeeName) {
-      const fullName = `${request.users.first_name} ${request.users.last_name}`.toLowerCase()
+      const fullName = claimantName(request.users).toLowerCase()
       if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
         return false
       }
@@ -372,7 +373,7 @@ const organizedData = computed(() => {
     const employeeId = request.employee_id
     
     // Skip if user data is missing or invalid
-    if (!request.users || !request.users.first_name || !request.users.last_name) {
+    if (!request.users) {
       return
     }
     
@@ -381,7 +382,7 @@ const organizedData = computed(() => {
       return
     }
     
-    const employeeName = `${request.users.first_name} ${request.users.last_name}`
+    const employeeName = claimantName(request.users)
     const employeeDept = request.users.department
     
     if (!organized[employeeId]) {

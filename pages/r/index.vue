@@ -19,6 +19,7 @@
   import { toast } from '@/components/ui/toast'
   import { Button } from '@/components/ui/button'
   import { isReviewerQueueClaim } from '~/lib/claimRouting'
+  import { fetchQueueStats, claimantName } from '~/lib/queueStats'
 
   const client = useSupabaseClient()
   const user = useSupabaseUser()
@@ -34,7 +35,8 @@
     adminVerified: 0,
     managerApproved: 0,
     completed: 0,
-    rejectedRequests: 0
+    rejectedRequests: 0,
+    approvedRequests: 0
   })
   const pendingRequests = ref([])
 
@@ -83,45 +85,27 @@
     
     loading.value = true
     try {
-      // Fetch user count
-      const { count, error: countError } = await client
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-      
-      if (countError) {
-        throw countError;
+      // Counted in the database; loading every claim hit the 1,000-row limit.
+      const counts = await fetchQueueStats(client, 'reviewer')
+      stats.value = {
+        totalUsers: counts.totalUsers,
+        totalRequests: counts.total,
+        pendingRequests: counts.pending,
+        adminVerified: counts.verified,
+        managerApproved: counts.approved,
+        completed: counts.completed,
+        rejectedRequests: counts.rejected,
+        // Verified or approved, but not yet processed.
+        approvedRequests: counts.verified + counts.approved,
       }
-      
-      stats.value.totalUsers = count || 0
-      
-      // Fetch reimbursement request stats
-      const requestResponse = await client
-        .from('claims')
-        .select('status, job_number, users:users!claims_employee_id_fkey(role, department)')
-      
-      if (requestResponse.error) {
-        throw requestResponse.error;
-      }
-      
-      const requestData = (requestResponse.data || []).filter(isReviewerQueueClaim);
-      
-      stats.value.totalRequests = requestData.length || 0
-      stats.value.pendingRequests = requestData.filter(r => r.status === 'pending').length || 0
-      stats.value.adminVerified = requestData.filter(r => r.status === 'verified').length || 0
-      stats.value.managerApproved = requestData.filter(r => r.status === 'approved').length || 0
-      stats.value.completed = requestData.filter(r => r.status === 'processed').length || 0
-      stats.value.rejectedRequests = requestData.filter(r => r.status === 'rejected').length || 0
-      
-      // For display purposes, use this:
-      stats.value.approvedRequests = stats.value.adminVerified + stats.value.managerApproved
-      
+
       // Fetch pending reimbursement requests for the dashboard
       const pendingResponse = await client
         .from('claims')
         .select(`
           *,
           claim_categories:category_id(category_name),
-          category_subcategory_mapping!inner(
+          category_subcategory_mapping(
             id,
             claim_subcategories:subcategory_id(subcategory_name)
           ),
@@ -129,7 +113,7 @@
         `)
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
-        .limit(50)
+        .limit(200)
       
       if (pendingResponse.error) {
         throw pendingResponse.error;
@@ -314,11 +298,11 @@
                       </template>
                     </TableCell>
                     <TableCell class="text-xs py-3">
-                      {{ request.profiles ? `${request.profiles.first_name} ${request.profiles.last_name}` : 'Unknown' }}
+                      {{ claimantName(request.profiles) }}
                     </TableCell>
                     <TableCell class="text-xs py-3">
-                      <div class="font-medium">{{ request.claim_categories.category_name }}</div>
-                      <div class="text-muted-foreground">{{ request.category_subcategory_mapping.claim_subcategories.subcategory_name }}</div>
+                      <div class="font-medium">{{ request.claim_categories?.category_name || 'N/A' }}</div>
+                      <div class="text-muted-foreground">{{ request.category_subcategory_mapping?.claim_subcategories?.subcategory_name || '' }}</div>
                     </TableCell>
                     <TableCell class="text-xs py-3">
                       <div class="font-medium">{{ request.description }}</div>

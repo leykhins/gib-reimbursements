@@ -1,5 +1,6 @@
 <script setup lang="ts">
   import { ref, computed, onMounted, watch } from 'vue'
+  import { claimantName } from '~/lib/queueStats'
   import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
   import { Button } from '@/components/ui/button'
   import { Input } from '@/components/ui/input'
@@ -212,7 +213,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
         .from('claims')
         .select(`
           *,
-          users:users!claims_employee_id_fkey(first_name, last_name, department, role),
+          users:users!claims_employee_id_fkey(first_name, last_name, email, department, role),
           category:category_id(id, category_name),
           subcategory_mapping:subcategory_mapping_id(
             id,
@@ -236,7 +237,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
       
       // Filter out claims that don't have valid user data
       const validClaims = (data || []).filter(claim => {
-        if (!claim.users || !claim.users.first_name || !claim.users.last_name) {
+        if (!claim.users) {
           console.warn('Filtering out claim with missing user data:', claim.id)
           return false
         }
@@ -266,7 +267,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
   const applyFilters = () => {
     filteredRequests.value = reimbursementRequests.value.filter(request => {
       // Additional safety check - ensure user data exists
-      if (!request.users || !request.users.first_name || !request.users.last_name) {
+      if (!request.users) {
         return false
       }
 
@@ -290,7 +291,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
       
       // Employee name filter
       if (filters.value.employeeName) {
-        const fullName = `${request.users.first_name} ${request.users.last_name}`.toLowerCase()
+        const fullName = claimantName(request.users).toLowerCase()
         if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
           return false
         }
@@ -327,11 +328,11 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
       const employeeId = request.employee_id
       
       // Skip if user data is missing or invalid (should not happen due to filtering above)
-      if (!request.users || !request.users.first_name || !request.users.last_name) {
+      if (!request.users) {
         return
       }
       
-      const employeeName = `${request.users.first_name} ${request.users.last_name}`
+      const employeeName = claimantName(request.users)
       const employeeDept = request.users.department || 'Unknown Department'
       
       if (!organized[employeeId]) {

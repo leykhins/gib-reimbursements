@@ -29,17 +29,22 @@ export function splitFirstReviewNotificationIds(
   return { skipManagerIds, managerReviewIds }
 }
 
-/** Job-number claims from non-leadership, non-RSM staff go to the reviewer. */
+/**
+ * Job-number claims from everyone except managers, admins, reviewers and the
+ * RSM department go to the reviewer. Matches update_claim_status() in the
+ * database; a reviewer's own claims go to admin so nobody reviews their own.
+ */
 export function isReviewerQueueClaim(claim: {
   job_number?: string | null
   users?: { role?: string | null, department?: string | null } | null
 }): boolean {
   return hasJobNumber(claim.job_number)
     && !skipsManagerApproval(claim.users?.role)
+    && claim.users?.role !== 'reviewer'
     && !isRsmDepartment(claim.users?.department)
 }
 
-/** Overhead claims, leadership-submitted claims, and RSM department claims go to admin. */
+/** Overhead claims, leadership and reviewer claims, and RSM department claims go to admin. */
 export function isAdminQueueClaim(claim: {
   job_number?: string | null
   users?: { role?: string | null, department?: string | null } | null

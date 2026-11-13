@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { claimantName } from '~/lib/queueStats'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -225,7 +226,7 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
       .from('claims')
       .select(`
         *,
-        profiles:employee_id(first_name, last_name, department),
+        profiles:employee_id(first_name, last_name, email, department),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
@@ -303,7 +304,7 @@ const applyFilters = () => {
     
     // Employee name filter
     if (filters.value.employeeName) {
-      const fullName = `${request.profiles?.first_name} ${request.profiles?.last_name}`.toLowerCase()
+      const fullName = claimantName(request.profiles).toLowerCase()
       if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
         return false
       }
@@ -364,9 +365,7 @@ const organizedData = computed(() => {
   
   filteredRequests.value.forEach(request => {
     const employeeId = request.employee_id
-    const employeeName = request.profiles ? 
-      `${request.profiles.first_name} ${request.profiles.last_name}` : 
-      'Unknown Employee'
+    const employeeName = claimantName(request.profiles)
     const employeeDept = request.profiles?.department || 'Unknown Department'
     
     if (!organized[employeeId]) {

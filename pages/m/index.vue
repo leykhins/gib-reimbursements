@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { claimantName } from '~/lib/queueStats'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DollarSign, Clock, CheckCircle, FileText, XCircle } from 'lucide-vue-next'
@@ -245,7 +246,7 @@ const fetchRecentRequests = async (department) => {
       is_travel,
       start_location,
       destination,
-      users!claims_employee_id_fkey(first_name, last_name, department, role),
+      users!claims_employee_id_fkey(first_name, last_name, email, department, role),
       claim_categories:category_id(category_name),
       category_subcategory_mapping:subcategory_mapping_id(
         id,
@@ -448,7 +449,7 @@ const getStatusClass = (status) => {
                       Job: {{ request.job_number || 'N/A' }}
                     </template>
                   </TableCell>
-                  <TableCell class="text-xs py-3">{{ request.users?.first_name }} {{ request.users?.last_name }}</TableCell>
+                  <TableCell class="text-xs py-3">{{ claimantName(request.users) }}</TableCell>
                   <TableCell class="text-xs py-3">
                     <div class="font-medium">{{ request.claim_categories?.category_name || 'Unknown' }}</div>
                     <div class="text-muted-foreground">{{ request.category_subcategory_mapping?.claim_subcategories?.subcategory_name || 'Unknown' }}</div>

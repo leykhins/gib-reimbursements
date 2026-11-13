@@ -1,5 +1,6 @@
 <script setup lang="ts">
   import { ref, computed, onMounted } from 'vue'
+  import { claimantName } from '~/lib/queueStats'
   import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
   import { Button } from '@/components/ui/button'
   import { DollarSign, Clock, CheckCircle, FileText, ArrowUpRight } from 'lucide-vue-next'
@@ -86,7 +87,7 @@
           date,
           category_id,
           subcategory_mapping_id,
-          users!claims_employee_id_fkey(first_name, last_name, department)
+          users!claims_employee_id_fkey(first_name, last_name, email, department)
         `)
         .eq('status', 'approved')
         .order('date', { ascending: false })
@@ -328,7 +329,7 @@
                     </template>
                   </TableCell>
                   <TableCell class="text-xs py-3">
-                    {{ claim.users?.first_name }} {{ claim.users?.last_name }}
+                    {{ claimantName(claim.users) }}
                     <div class="text-muted-foreground">{{ claim.users?.department }}</div>
                   </TableCell>
                   <TableCell class="text-xs py-3">
