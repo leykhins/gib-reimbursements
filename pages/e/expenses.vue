@@ -552,57 +552,6 @@ const fetchAvailableYears = async () => {
   }
 }
 
-const submitClaim = async (claimData) => {
-  try {
-    // Insert the claim
-    const { data, error } = await client
-      .from('claims')
-      .insert({
-        ...claimData,
-        status: 'pending',
-        employee_id: user.value.id
-      })
-      .select()
-      .single()
-    
-    if (error) throw error
-    
-    // Send notification to all admins AND employee with error handling
-    try {
-      const notificationResult = await sendEnhancedClaimSubmissionEmailWithErrorHandling(
-        data.id,
-        toast
-      )
-      
-      if (!notificationResult.success) {
-        console.warn('Some email notifications failed:', notificationResult.errors)
-      }
-    } catch (emailError) {
-      console.error('Failed to send email notification:', emailError)
-      toast({
-        title: 'Email Notification Error',
-        description: 'Failed to send email notifications. Claim was submitted successfully.',
-        variant: 'destructive'
-      })
-    }
-    
-    // Show success message and refresh
-    toast({
-      title: 'Success',
-      description: 'Claim submitted successfully',
-      variant: 'default'
-    })
-    await refreshClaims()
-  } catch (err) {
-    console.error('Error submitting claim:', err)
-    toast({
-      title: 'Error',
-      description: 'Failed to submit claim',
-      variant: 'destructive'
-    })
-  }
-}
-
 // Add computed properties for footer totals
 const totalExpensesCount = computed(() => {
   return filteredRequests.value.length

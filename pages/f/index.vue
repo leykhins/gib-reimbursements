@@ -167,52 +167,6 @@
     const pst = parseFloat(claim.pst_amount || 0)
     return baseAmount + gst + pst
   }
-  
-  // Mark claim as processed
-  const markAsProcessed = async (claimId) => {
-    try {
-      loading.value = true
-      
-      const { error: updateError } = await client
-        .from('claims')
-        .update({
-          status: 'completed',
-          accounting_processed_by: user.value.id,
-          accounting_processed_at: new Date().toISOString(),
-        })
-        .eq('id', claimId)
-      
-      if (updateError) throw updateError
-      
-      // Remove the processed claim from the list
-      recentClaims.value = recentClaims.value.filter(claim => claim.id !== claimId)
-      
-      // Update stats
-      const processedClaim = recentClaims.value.find(claim => claim.id === claimId)
-      if (processedClaim) {
-        const amount = getTotalAmount(processedClaim)
-        stats.value.pendingPayments--
-        stats.value.pendingAmount -= amount
-        stats.value.processedPayments++
-        stats.value.totalReimbursed += amount
-      }
-      
-      toast({
-        title: 'Success',
-        description: 'Claim marked as processed successfully',
-        variant: 'default'
-      })
-    } catch (err) {
-      console.error('Error processing claim:', err)
-      toast({
-        title: 'Error',
-        description: 'Failed to process claim',
-        variant: 'destructive'
-      })
-    } finally {
-      loading.value = false
-    }
-  }
 </script>
 
 <template>

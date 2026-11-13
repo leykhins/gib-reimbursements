@@ -2,7 +2,8 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useSupabaseClient, useSupabaseUser } from '#imports'
 import { useRouter } from 'vue-router'
-import { 
+import { authHeaders } from '~/lib/apiAuth'
+import {
   Users, 
   UserCog, 
   Shield, 
@@ -631,6 +632,7 @@ const sendInvitations = async () => {
     // Use $fetch instead of useFetch for mounted components
     const response = await $fetch('/api/admin/invite-users', {
       method: 'POST',
+      headers: await authHeaders(),
       body: {
         users: inviteEmails.value.map(entry => ({ email: entry.email }))
       }
