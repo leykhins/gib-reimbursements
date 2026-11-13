@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useSupabaseClient, useSupabaseUser } from '#imports'
 import { useRouter } from 'vue-router'
 import { authHeaders } from '~/lib/apiAuth'
+import { useClaimSettings } from '~/composables/useClaimSettings'
 import {
   Users, 
   UserCog, 
@@ -87,6 +88,8 @@ import {
 const client = useSupabaseClient()
 const user = useSupabaseUser()
 const router = useRouter()
+// The default mileage rate (Rates page), for people without their own
+const { settings: claimSettings, load: loadClaimSettings } = useClaimSettings()
 
 // State for users
 const users = ref([])
@@ -109,7 +112,7 @@ const editForm = ref({
   email: '',
   role: '',
   department: '',
-  mileage_rate: 0.61
+  mileage_rate: claimSettings.value.defaultMileageRate
 })
 const passwordForm = ref({
   password: '',
@@ -353,7 +356,7 @@ const editUser = (user) => {
     email: user.email || '',
     role: user.role || 'user',
     department: user.department || '',
-    mileage_rate: user.mileage_rate || 0.61
+    mileage_rate: user.mileage_rate || claimSettings.value.defaultMileageRate
   }
   showEditSheet.value = true
 }
@@ -687,6 +690,7 @@ const clearFilters = () => {
 onMounted(async () => {
   await checkAdminStatus()
   if (isAdmin.value) {
+    loadClaimSettings().catch(error => console.error('Error loading claim rates:', error))
     await fetchUsers()
   }
 })
@@ -796,7 +800,7 @@ definePageMeta({
                   </span>
                 </TableCell>
                 <TableCell>{{ user.department || '-' }}</TableCell>
-                <TableCell>${{ (user.mileage_rate || 0.61).toFixed(2) }}/km</TableCell>
+                <TableCell>${{ Number(user.mileage_rate || claimSettings.defaultMileageRate).toFixed(2) }}/km</TableCell>
                 <TableCell>{{ new Date(user.created_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) }}</TableCell>
                 <TableCell>
                   <div class="flex justify-end gap-2">
@@ -943,7 +947,7 @@ definePageMeta({
               step="0.01" 
               min="0" 
               max="10"
-              placeholder="0.61"
+              :placeholder="claimSettings.defaultMileageRate.toFixed(2)"
             />
           </div>
         </div>

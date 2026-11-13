@@ -11,6 +11,8 @@
   import { format, formatISO, parse } from 'date-fns'
   import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
   import { cn } from '@/lib/utils'
+  import { useClaimSettings } from '~/composables/useClaimSettings'
+  import { parkingGst, percentLabel } from '~/lib/claimSettings'
   import { Skeleton } from '@/components/ui/skeleton'
   import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
   import { Toaster } from '@/components/ui/toast'
@@ -56,8 +58,11 @@
   // Get the runtime config
   const config = useRuntimeConfig()
 
-  // Add a ref to store the user's mileage rate
-  const userMileageRate = ref(0.61) // Default fallback
+  // The shared rates (Rates page). Holds the seeded defaults until loaded.
+  const { settings: claimSettings, load: loadClaimSettings } = useClaimSettings()
+
+  // The user's own mileage rate, or the default rate when they have none
+  const userMileageRate = ref(claimSettings.value.defaultMileageRate)
 
   // Add function to fetch user's mileage rate
   const fetchUserMileageRate = async () => {
@@ -72,15 +77,12 @@
       
       if (error) throw error
       
-      userMileageRate.value = data.mileage_rate || 0.61
+      userMileageRate.value = Number(data.mileage_rate) || claimSettings.value.defaultMileageRate
     } catch (error) {
       console.error('Error fetching user mileage rate:', error)
       // Keep default rate on error
     }
   }
-
-  // Define constants for mileage calculation
-  // const MILEAGE_RATE = 0.61 // Remove this line
 
   // Add Google Maps API configuration - use API key from environment
   const GOOGLE_MAPS_API_KEY = config.public.googleMapsApiKey || ''
@@ -184,9 +186,9 @@
   const dbCategories = ref<any[]>([])
   const dbSubcategories = ref<any[]>([])
   const categoriesLoading = ref(true)
-  const LIVE_OUT_NIGHT_RATE = 50
-  const LIVE_OUT_MAX_NIGHTS_PER_WEEK = 5
-  const LIVE_OUT_MAX_AMOUNT_PER_WEEK = LIVE_OUT_NIGHT_RATE * LIVE_OUT_MAX_NIGHTS_PER_WEEK
+  const LIVE_OUT_NIGHT_RATE = computed(() => claimSettings.value.liveOutNightRate)
+  const LIVE_OUT_MAX_NIGHTS_PER_WEEK = computed(() => claimSettings.value.liveOutMaxNightsPerWeek)
+  const LIVE_OUT_MAX_AMOUNT_PER_WEEK = computed(() => LIVE_OUT_NIGHT_RATE.value * LIVE_OUT_MAX_NIGHTS_PER_WEEK.value)
 
   //Set the last selected date to the first expense date
   lastSelectedDate.value = expenses.value[0].date
@@ -248,7 +250,9 @@
 
   // Call the fetch function when component mounts
   onMounted(async () => {
-    await fetchUserMileageRate() // Fetch user's rate first
+    // Rates first: the user's mileage rate falls back to the default one
+    await loadClaimSettings().catch(error => console.error('Error loading claim rates:', error))
+    await fetchUserMileageRate()
     fetchCategories()
     
     if (!window.google) {
@@ -330,7 +334,7 @@
     }
 
     return Object.values(weeklyNights).reduce(
-      (sum, nights) => sum + Math.min(nights, LIVE_OUT_MAX_NIGHTS_PER_WEEK),
+      (sum, nights) => sum + Math.min(nights, LIVE_OUT_MAX_NIGHTS_PER_WEEK.value),
       0
     )
   }
@@ -399,7 +403,7 @@
 
     ensureLiveOutEndAfterStart(expense)
     const cappedNights = getCappedLiveOutNights(expense)
-    const amount = cappedNights * LIVE_OUT_NIGHT_RATE
+    const amount = cappedNights * LIVE_OUT_NIGHT_RATE.value
 
     expense.amount = amount.toFixed(2)
     expense.gst_amount = '0.00'
@@ -469,9 +473,9 @@
     
     let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
     
-    // Add 2% extra if location includes Vancouver
+    // Add the Vancouver uplift if the trip starts or ends there
     if (startLocation && destination && isVancouverLocation(startLocation, destination)) {
-      amount = amount * 1.02
+      amount = amount * (1 + claimSettings.value.vancouverMileageUplift)
     }
     
     return amount.toFixed(2)
@@ -482,9 +486,9 @@
     
     let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
     
-    // Add 2% extra if location includes Vancouver
+    // Add the Vancouver uplift if the trip starts or ends there
     if (isVancouverLocation(startLocation, destination)) {
-      amount = amount * 1.02
+      amount = amount * (1 + claimSettings.value.vancouverMileageUplift)
     }
     
     return amount.toFixed(2)
@@ -819,7 +823,7 @@
             
             // Add Vancouver bonus indicator to description if applicable
             if (isVancouverLocation(entry.startLocation, entry.destination)) {
-              description += ' (Vancouver +2%)';
+              description += ` (Vancouver +${percentLabel(claimSettings.value.vancouverMileageUplift)})`;
             }
             
             // Add job number to description if it exists and should be shown
@@ -1159,10 +1163,10 @@
     }, 0).toFixed(2)
   })
 
-  // Parking receipts show a GST-inclusive total, so the GST is the 5% inside it.
+  // Parking receipts show a GST-inclusive total, so the GST is the share inside it.
   const calculateParkingGST = (amount: string): string => {
     if (!amount || isNaN(parseFloat(amount))) return '0.00'
-    return ((parseFloat(amount) / 1.05) * 0.05).toFixed(2)
+    return parkingGst(parseFloat(amount), claimSettings.value.parkingGstRate).toFixed(2)
   }
 
   // Update the handleCategoryChange function to calculate GST for parking

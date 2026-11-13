@@ -12,6 +12,7 @@
   import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
   import { cn } from '@/lib/utils'
   import { parseLocalDateString } from '~/lib/utils'
+  import { useClaimSettings } from '~/composables/useClaimSettings'
   import { Skeleton } from '@/components/ui/skeleton'
   import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
   import { Toaster } from '@/components/ui/toast'
@@ -182,15 +183,18 @@
     }
   }
 
-  // User mileage rate
-  const userMileageRate = ref(0.61)
+  // The shared rates (Rates page) and the user's own mileage rate, if any
+  const { settings: claimSettings, load: loadClaimSettings } = useClaimSettings()
+  const ownMileageRate = ref<number | null>(null)
+  const userMileageRate = computed(() => ownMileageRate.value || claimSettings.value.defaultMileageRate)
 
   const fetchUserMileageRate = async () => {
     if (!user.value) return
+    loadClaimSettings().catch(error => console.error('Error loading claim rates:', error))
     try {
       const { data } = await client.from('users').select('mileage_rate').eq('id', user.value.id).single()
-      const row = data as { mileage_rate?: number } | null
-      if (row?.mileage_rate) userMileageRate.value = row.mileage_rate
+      const row = data as { mileage_rate?: number | string } | null
+      if (row?.mileage_rate) ownMileageRate.value = Number(row.mileage_rate)
     } catch {}
   }
 
@@ -275,7 +279,7 @@
     if (isNaN(dist) || dist <= 0) return
     let amount = dist * userMileageRate.value
     if (isVancouverLocation(editForm.value.startLocation, editForm.value.destination)) {
-      amount *= 1.02
+      amount *= 1 + claimSettings.value.vancouverMileageUplift
     }
     editForm.value.amount = amount.toFixed(2)
   }
