@@ -592,13 +592,19 @@
     }
   }
 
-  // Receipts must be an image or PDF (blocks .msg, .eml, Office docs, etc.)
+  // Matches the receipts bucket in storage, which refuses anything else with an unclear error:
+  // JPG, PNG, HEIC/HEIF (converted to JPG before upload) or PDF, up to 25 MB.
+  const MAX_RECEIPT_MB = 25
   const assertReceiptFileType = (file: File) => {
     const name = file.name.toLowerCase()
-    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/.test(name)
+    const isImage = ['image/jpeg', 'image/png', 'image/heic', 'image/heif'].includes(file.type) || /\.(jpe?g|png|heic|heif)$/.test(name)
     const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf')
     if (!isImage && !isPdf) {
-      throw new Error('Receipts must be an image or PDF file.')
+      throw new Error('Receipts must be a JPG, PNG, HEIC or PDF file.')
+    }
+    if (file.size > MAX_RECEIPT_MB * 1024 * 1024) {
+      const mb = (file.size / 1024 / 1024).toFixed(1)
+      throw new Error(`This file is ${mb} MB. Receipts can be up to ${MAX_RECEIPT_MB} MB, so take a smaller photo or compress the PDF.`)
     }
   }
 
@@ -2197,7 +2203,7 @@
                     type="file" 
                     :id="`receipt-${expense.id}`" 
                     class="hidden" 
-                    accept="image/*,.pdf,.heic,.heif" 
+                    accept="image/jpeg,image/png,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.heic,.heif,.pdf" 
                     @change="(e) => handleFileUpload(e, expense.id)"
                     required
                   />
@@ -2208,7 +2214,7 @@
                         {{ isDragging[expense.id] ? 'Drop file here' : uploadStatus[expense.id] === 'converting' ? 'Converting HEIC to JPG...' : uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click or drag file here' }}
                       </p>
                       <p class="text-responsive-xs text-gray-500 mt-1">
-                        JPG, PNG or PDF (max. 10MB)
+                        JPG, PNG, HEIC or PDF (max. 25 MB)
                       </p>
                       
                       <!-- Conversion status for upload -->
@@ -2288,7 +2294,7 @@
                         type="file" 
                         :id="`secondReceipt-${expense.id}`" 
                         class="hidden" 
-                        accept="image/*,.pdf,.heic,.heif" 
+                        accept="image/jpeg,image/png,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.heic,.heif,.pdf" 
                         @change="(e) => handleSecondFileUpload(e, expense.id)"
                       />
                       <label :for="`secondReceipt-${expense.id}`" class="cursor-pointer">
@@ -2298,7 +2304,7 @@
                             {{ isDragging[expense.id] ? 'Drop second receipt here' : uploadStatus[expense.id] === 'converting' ? 'Converting HEIC to JPG...' : uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click or drag second receipt here' }}
                           </p>
                           <p class="text-responsive-xs text-gray-500 mt-1">
-                            JPG, PNG or PDF (max. 10MB)
+                            JPG, PNG, HEIC or PDF (max. 25 MB)
                           </p>
                           
                           <!-- Conversion status for second upload -->
