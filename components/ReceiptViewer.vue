@@ -1,10 +1,8 @@
 <!-- components/ReceiptViewer.vue -->
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Loader2 } from 'lucide-vue-next'
+import { ref, watch } from 'vue'
 import { getReceiptSignedUrl } from '~/lib/utils'
+import Lightbox, { type LightboxItem } from '~/components/Lightbox.vue'
 
 const client = useSupabaseClient()
 
@@ -17,117 +15,58 @@ const props = withDefaults(defineProps<{
   title: 'Receipt'
 })
 
-const activeTab = ref<'r1' | 'r2'>('r1')
-const hasSecond = computed(() => !!props.url2)
+const items = ref<LightboxItem[]>([])
+const index = ref(0)
+const loading = ref(false)
+let request = 0
 
-const signed1 = ref('')
-const signed2 = ref('')
-const isImg1 = ref(false)
-const isImg2 = ref(false)
-const loading1 = ref(false)
-const loading2 = ref(false)
+/** Browsers show images and PDFs. Anything else is offered as a download. */
+function canFrame(path: string) {
+  return /\.pdf$/i.test(path)
+}
 
 async function loadUrls() {
-  signed1.value = ''
-  signed2.value = ''
-  isImg1.value = false
-  isImg2.value = false
+  const token = ++request
+  const paths = [props.url1, props.url2].filter((p): p is string => !!p)
+  index.value = 0
+  items.value = []
+  if (!paths.length) return
 
-  if (props.url1) {
-    loading1.value = true
-    try {
-      const { signedUrl, isImage } = await getReceiptSignedUrl(client, props.url1)
-      signed1.value = signedUrl || ''
-      isImg1.value = !!isImage
-    } finally {
-      loading1.value = false
-    }
-  }
-
-  if (props.url2) {
-    loading2.value = true
-    try {
-      const { signedUrl, isImage } = await getReceiptSignedUrl(client, props.url2)
-      signed2.value = signedUrl || ''
-      isImg2.value = !!isImage
-    } finally {
-      loading2.value = false
-    }
+  loading.value = true
+  try {
+    const loaded = await Promise.all(paths.map(async (path, i) => {
+      const { signedUrl, isImage } = await getReceiptSignedUrl(client, path)
+      return {
+        src: signedUrl || '',
+        isImage,
+        canFrame: isImage || canFrame(path),
+        label: paths.length > 1 ? `Receipt ${i + 1}` : 'Receipt',
+        failed: !signedUrl,
+      } satisfies LightboxItem
+    }))
+    // A newer claim was opened while these were loading.
+    if (token !== request) return
+    items.value = loaded
+  } finally {
+    if (token === request) loading.value = false
   }
 }
 
-watch(() => open?.value, (val) => {
-  if (val) {
-    activeTab.value = props.url1 ? 'r1' : 'r2'
-    loadUrls()
-  }
+watch(() => open.value, (val) => {
+  if (val) loadUrls()
 })
 
 watch(() => [props.url1, props.url2], () => {
-  if (open?.value) {
-    activeTab.value = props.url1 ? 'r1' : 'r2'
-    loadUrls()
-  }
+  if (open.value) loadUrls()
 })
 </script>
 
 <template>
-  <Dialog v-model:open="open">
-    <DialogContent class="max-w-4xl">
-      <DialogHeader>
-        <DialogTitle>{{ props.title }}</DialogTitle>
-      </DialogHeader>
-
-      <div class="h-[70vh] overflow-auto">
-        <template v-if="hasSecond">
-          <Tabs v-model="activeTab" default-value="r1" class="w-full">
-            <TabsList class="grid grid-cols-2 w-full bg-primary p-1 rounded-md">
-              <TabsTrigger
-                value="r1"
-                class="text-white data-[state=active]:bg-secondary data-[state=active]:text-white rounded-sm"
-              >
-                Receipt 1
-              </TabsTrigger>
-              <TabsTrigger
-                value="r2"
-                class="text-white data-[state=active]:bg-secondary data-[state=active]:text-white rounded-sm"
-              >
-                Receipt 2
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="r1">
-              <div class="h-[64vh] overflow-hidden">
-                <div v-if="loading1" class="flex items-center justify-center h-full">
-                  <Loader2 class="h-8 w-8 animate-spin text-black" />
-                </div>
-                <ZoomableImage v-else-if="isImg1 && signed1" :src="signed1" alt="Receipt 1" />
-                <iframe v-else-if="signed1" :src="signed1" class="w-full h-full"></iframe>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="r2">
-              <div class="h-[64vh] overflow-hidden">
-                <div v-if="loading2" class="flex items-center justify-center h-full">
-                  <Loader2 class="h-8 w-8 animate-spin text-black" />
-                </div>
-                <ZoomableImage v-else-if="isImg2 && signed2" :src="signed2" alt="Receipt 2" />
-                <iframe v-else-if="signed2" :src="signed2" class="w-full h-full"></iframe>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </template>
-
-        <template v-else>
-          <div class="h-[64vh] overflow-hidden">
-            <div v-if="loading1" class="flex items-center justify-center h-full">
-              <Loader2 class="h-8 w-8 animate-spin text-black" />
-            </div>
-            <ZoomableImage v-else-if="isImg1 && signed1" :src="signed1" alt="Receipt" />
-            <iframe v-else-if="signed1" :src="signed1" class="w-full h-full"></iframe>
-          </div>
-        </template>
-      </div>
-    </DialogContent>
-  </Dialog>
+  <Lightbox
+    v-model:open="open"
+    v-model:index="index"
+    :items="items"
+    :title="props.title"
+    :loading="loading"
+  />
 </template>

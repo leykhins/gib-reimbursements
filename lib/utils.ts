@@ -22,7 +22,8 @@ export const getReceiptSignedUrl = async (
     
     const { data, error } = await client.storage
       .from('receipts')
-      .createSignedUrl(receiptUrl, 60);
+      // Long enough for the lightbox's "open in a new tab" and PDF frames to keep working.
+      .createSignedUrl(receiptUrl, 60 * 10);
     
     if (error) {
       console.error('Supabase storage error:', error);
