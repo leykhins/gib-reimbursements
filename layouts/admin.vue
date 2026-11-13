@@ -10,7 +10,8 @@ import {
   Home,
   X,
   Banknote,
-  Clock
+  Clock,
+  Percent,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
@@ -29,6 +30,7 @@ const adminNavItems = [
   { name: 'Pending', icon: Clock, path: '/a/pending' },
   { name: 'Expenses', icon: Banknote, path: '/a/expenses' },
   { name: 'Users', icon: Users, path: '/a/users' },
+  { name: 'Rates', icon: Percent, path: '/a/rates' },
 ]
 
 const toggleSidebar = () => {

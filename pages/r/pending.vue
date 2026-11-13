@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { countWaitingMonths, type WaitingMonth } from '~/lib/utils'
+import WaitingMonths from '~/components/WaitingMonths.vue'
+import { claimantName } from '~/lib/queueStats'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Check, MessageSquare, X } from 'lucide-vue-next'
+import { Check, MessageSquare, Pencil, X } from 'lucide-vue-next'
+import ClaimCorrectionDialog from '~/components/ClaimCorrectionDialog.vue'
+import { correctionAccess } from '~/lib/claimCorrection'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 
@@ -24,7 +29,7 @@ import { format, addDays, endOfMonth, endOfDay, isAfter } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { getReceiptSignedUrl } from '~/lib/utils'
+import { getReceiptSignedUrl, parseLocalDateString } from '~/lib/utils'
 import { isReviewerQueueClaim } from '~/lib/claimRouting'
 import {
   Tooltip,
@@ -106,19 +111,31 @@ const newNote = ref('')
 const selectedClaim = ref(null)
 const userRole = ref('')
 
+// Corrections go through correct_claim(), which writes the change and the reason as a note.
+const correctingClaim = ref<any>(null)
+const canCorrect = (request) => correctionAccess(request, userRole.value, user.value?.id, null) === 'edit'
+const onCorrected = async (movedTo: string | null) => {
+  correctingClaim.value = null
+  toast({
+    title: 'Claim corrected',
+    description: movedTo ? 'The claim moved to another month. The change is saved as a note.' : 'The change is saved as a note on the claim.'
+  })
+  await Promise.all([fetchReimbursementRequests(), fetchMonthlyStatusIndicators()])
+}
+
 // Add this new function to fetch unique years from claims
 const fetchAvailableYears = async () => {
   try {
     const { data, error } = await client
       .from('claims')
-      .select('date, job_number, users:users!claims_employee_id_fkey(role)')
+      .select('date, job_number, users:users!claims_employee_id_fkey(role, department)')
       .eq('status', 'pending')
     
     if (error) throw error
     
     // Extract unique years from claims
     const uniqueYears = new Set(
-      data.filter(isReviewerQueueClaim).map(claim => new Date(claim.date).getFullYear())
+      data.filter(isReviewerQueueClaim).map(claim => parseLocalDateString(claim.date).getFullYear())
     )
     
     // Add current year if not present
@@ -215,7 +232,7 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
       .from('claims')
       .select(`
         *,
-        users:users!claims_employee_id_fkey(first_name, last_name, department, role),
+        users:users!claims_employee_id_fkey(first_name, last_name, email, department, role),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
@@ -225,6 +242,7 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
           id,
           note,
           role,
+          kind,
           created_at,
           user:user_id(
             id,
@@ -265,7 +283,7 @@ const applyFilters = () => {
       return false
     }
     
-    const requestDate = new Date(request.date)
+    const requestDate = parseLocalDateString(request.date)
     const requestMonth = requestDate.getMonth()
     const requestYear = requestDate.getFullYear()
     
@@ -281,7 +299,7 @@ const applyFilters = () => {
     
     // Employee name filter
     if (filters.value.employeeName) {
-      const fullName = `${request.users?.first_name} ${request.users?.last_name}`.toLowerCase()
+      const fullName = claimantName(request.users).toLowerCase()
       if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
         return false
       }
@@ -320,12 +338,12 @@ const organizedData = computed(() => {
     const employeeId = request.employee_id
     
     // Skip if user data is missing or invalid
-    if (!request.users || !request.users.first_name || !request.users.last_name) {
+    if (!request.users) {
       console.warn('Skipping request with missing user data:', request.id)
       return
     }
     
-    const employeeName = `${request.users.first_name} ${request.users.last_name}`
+    const employeeName = claimantName(request.users)
     const employeeDept = request.users.department || 'Unknown Department'
     
     if (!organized[employeeId]) {
@@ -430,13 +448,17 @@ const formatDate = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy')
 }
 
+const formatClaimDate = (dateString) => {
+  return format(parseLocalDateString(dateString), 'MMM d, yyyy')
+}
+
 const formatDateTime = (dateString) => {
   return format(new Date(dateString), 'MMM d, yyyy h:mm a')
 }
 
 const isLateSubmission = (expenseDate, submittedAt) => {
   if (!expenseDate || !submittedAt) return false
-  const deadline = endOfDay(addDays(endOfMonth(new Date(expenseDate)), 7))
+  const deadline = endOfDay(addDays(endOfMonth(parseLocalDateString(expenseDate)), 7))
   return isAfter(new Date(submittedAt), deadline)
 }
 
@@ -495,7 +517,7 @@ const changeMonth = (newMonth) => {
   
   // Check if we already have data for this month/year
   const hasDataForMonth = reimbursementRequests.value.some(request => {
-    const requestDate = new Date(request.date)
+    const requestDate = parseLocalDateString(request.date)
     return requestDate.getMonth() === newMonth && requestDate.getFullYear() === selectedYear.value
   })
   
@@ -516,7 +538,7 @@ const changeYear = (newYear) => {
   
   // Check if we already have data for this year
   const hasDataForYear = reimbursementRequests.value.some(request => {
-    const requestDate = new Date(request.date)
+    const requestDate = parseLocalDateString(request.date)
     return requestDate.getFullYear() === newYear
   })
   
@@ -647,20 +669,25 @@ const confirmVerification = async () => {
 // Add a new ref to store monthly status indicators separately
 const monthlyStatusIndicators = ref({})
 
-// Fetch monthly status indicators for all months in the selected year
+// Every month with claims waiting, across years (see WaitingMonths.vue)
+const waitingMonths = ref<WaitingMonth[]>([])
+
+const goToMonth = async (year: number, month: number) => {
+  const yearChanged = year !== selectedYear.value
+  selectedYear.value = year
+  selectedMonth.value = month
+  if (yearChanged) fetchMonthlyStatusIndicators()
+  await fetchReimbursementRequests()
+}
+
+// The month dots for the selected year, plus the Waiting in strip
 const fetchMonthlyStatusIndicators = async () => {
   try {
-    // Calculate date range for the entire year
-    const startDateStr = `${selectedYear.value}-01-01`
-    const endDateStr = `${selectedYear.value + 1}-01-01`
-    
-    // Fetch only date and status for pending claims in this year
+    // Fetch only date and status for pending claims in every year, for the dots and the Waiting in strip
     const { data, error } = await client
       .from('claims')
-      .select('date, status, job_number, users:users!claims_employee_id_fkey(role)')
+      .select('date, status, job_number, users:users!claims_employee_id_fkey(role, department)')
       .eq('status', 'pending')
-      .gte('date', startDateStr)
-      .lt('date', endDateStr)
     
     if (error) throw error
     
@@ -689,6 +716,7 @@ const fetchMonthlyStatusIndicators = async () => {
     }
     
     monthlyStatusIndicators.value = status
+    waitingMonths.value = countWaitingMonths(data ? data.filter(isReviewerQueueClaim) : [])
   } catch (err) {
     console.error('Error fetching monthly status indicators:', err)
   }
@@ -792,6 +820,7 @@ const confirmRejection = async () => {
     selectedRequests.value.clear()
     rejectingRequests.value = []
     await fetchReimbursementRequests()
+    await fetchMonthlyStatusIndicators() // Refresh status indicators
   } catch (err) {
     console.error('Error rejecting request:', err)
     toast({
@@ -911,7 +940,7 @@ const getActionableClaimsCount = (category) => {
     <!-- Month navigation tabs -->
     <div class="flex flex-col lg:flex-row items-stretch lg:items-center text-responsive-base gap-2">
       <div class="w-full bg-white lg:w-32 text-sm">
-        <Select v-model="selectedYear">
+        <Select :model-value="selectedYear" @update:model-value="(value) => changeYear(Number(value))">
           <SelectTrigger class="h-8 w-full">
             <div class="flex items-center">
               <CalendarIcon class="w-4 h-4 mr-2" />
@@ -977,6 +1006,8 @@ const getActionableClaimsCount = (category) => {
       </div>
     </div>
     
+    <WaitingMonths :months="waitingMonths" :year="selectedYear" :month="selectedMonth" @select="goToMonth" />
+
     <!-- Border under months -->
     <div class="h-px w-full bg-border"></div>
 
@@ -1236,7 +1267,7 @@ const getActionableClaimsCount = (category) => {
                                     class="white-checkbox"
                                   />
                                 </TableCell>
-                                <TableCell class="py-2 text-sm">{{ formatDate(request.date) }}</TableCell>
+                                <TableCell class="py-2 text-sm">{{ formatClaimDate(request.date) }}</TableCell>
                                 <TableCell class="py-2 text-sm">
                                   <div class="flex items-center gap-2">
                                     <span>{{ formatDateTime(request.created_at) }}</span>
@@ -1291,8 +1322,8 @@ const getActionableClaimsCount = (category) => {
                                   </TableCell>
                                 <TableCell class="py-2">
                                   <div v-if="request.notes && request.notes.length > 0" class="space-y-1">
-                                    <div v-for="note in request.notes" :key="note.id" class="text-sm">
-                                      <span class="font-medium capitalize">{{ note.role }}:</span> {{ note.note }}
+                                    <div v-for="note in request.notes" :key="note.id" :class="['text-sm', note.kind === 'correction' && 'rounded border border-orange-200 bg-orange-50 px-2 py-1']">
+                                      <span class="font-medium capitalize">{{ note.role }}<template v-if="note.kind === 'correction'"> correction</template>:</span> {{ note.note }}
                                       <span class="text-xs text-muted-foreground ml-2">
                                         {{ formatDate(note.created_at) }}
                                       </span>
@@ -1319,6 +1350,26 @@ const getActionableClaimsCount = (category) => {
                                       title="Add Note"
                                     >
                                       <MessageSquare class="h-4 w-4" />
+                                    </Button>
+                                    
+                                    <Button
+                                    
+                                      v-if="canCorrect(request)"
+                                    
+                                      variant="outline"
+                                    
+                                      size="sm"
+                                    
+                                      class="h-7 w-7 p-0 rounded-md bg-secondary text-white hover:bg-orange-700"
+                                    
+                                      @click="correctingClaim = request"
+                                    
+                                      title="Correct details"
+                                    
+                                    >
+                                    
+                                      <Pencil class="h-4 w-4" />
+                                    
                                     </Button>
                                     
                                     <Button 
@@ -1447,6 +1498,9 @@ const getActionableClaimsCount = (category) => {
         </div>
       </DialogContent>
     </Dialog>
+
+    <!-- Correction Dialog -->
+    <ClaimCorrectionDialog :claim="correctingClaim" @close="correctingClaim = null" @saved="onCorrected" />
 
     <!-- Note Dialog -->
     <Dialog v-model:open="noteDialogOpen">

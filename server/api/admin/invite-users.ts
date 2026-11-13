@@ -1,169 +1,49 @@
-import { defineEventHandler, readBody, getRequestHeader } from 'h3'
-import { createClient } from '@supabase/supabase-js'
+/**
+ * Admins invite people by email. Supabase sends the invite; the
+ * handle_new_user() trigger creates their users row (role employee), and
+ * they fill in their name on the signup page.
+ */
 
-// Rate limiter implementation
-class RateLimiter {
-  private queue: Array<() => Promise<any>> = []
-  private processing = false
-  private lastRequestTime = 0
-  private readonly minInterval: number
-
-  constructor(requestsPerSecond: number) {
-    this.minInterval = 1000 / requestsPerSecond
-  }
-
-  async addToQueue<T>(fn: () => Promise<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-      this.queue.push(async () => {
-        try {
-          const result = await fn()
-          resolve(result)
-        } catch (error) {
-          reject(error)
-        }
-      })
-      this.processQueue()
-    })
-  }
-
-  private async processQueue() {
-    if (this.processing) return
-    this.processing = true
-
-    while (this.queue.length > 0) {
-      const now = Date.now()
-      const timeSinceLastRequest = now - this.lastRequestTime
-      
-      if (timeSinceLastRequest < this.minInterval) {
-        await new Promise(resolve => 
-          setTimeout(resolve, this.minInterval - timeSinceLastRequest)
-        )
-      }
-
-      const task = this.queue.shift()
-      if (task) {
-        this.lastRequestTime = Date.now()
-        await task()
-      }
-    }
-
-    this.processing = false
-  }
-}
-
-// Create rate limiter instance
-const emailRateLimiter = new RateLimiter(2)
+const MAX_INVITES = 50
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export default defineEventHandler(async (event) => {
-  try {
-    // Get request body
-    const body = await readBody(event)
-    const { users } = body
-    
-    if (!Array.isArray(users)) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: 'Users must be an array'
-      })
-    }
-    
-    const config = useRuntimeConfig()
-    if (!config.supabaseServiceKey || !config.public.supabaseUrl) {
-      throw createError({
-        statusCode: 500,
-        statusMessage: 'Server misconfiguration: Supabase credentials missing',
-        data: { detail: 'SUPABASE_SERVICE_KEY or SUPABASE_URL not set in environment' }
-      })
-    }
-    const supabase = createClient(
-      config.public.supabaseUrl,
-      config.supabaseServiceKey,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
-      }
-    )
+  await requireCaller(event, ['admin'])
 
-    // Process invitations with rate limiting
-    const results = await Promise.all(
-      users.map(user => 
-        emailRateLimiter.addToQueue(async () => {
-          try {
-            const { email } = user
-            
-            if (!email || !email.includes('@')) {
-              return { email, success: false, error: 'Invalid email' }
-            }
-
-            // Get the site URL from headers if not in config
-            let siteUrl = config.public.siteUrl
-            
-            if (!siteUrl) {
-              const origin = getRequestHeader(event, 'origin') || getRequestHeader(event, 'host')
-              if (origin) {
-                siteUrl = origin.startsWith('http') ? origin : `https://${origin}`
-              } else {
-                siteUrl = 'https://claims.gibraltar.ca'
-              }
-            }
-            
-            const redirectUrl = `${siteUrl}/signup`
-            
-            // Send invitation email
-            const { data, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
-              redirectTo: redirectUrl
-            })
-            
-            if (inviteError) {
-              return { email, success: false, error: inviteError.message }
-            }
-            
-            // Add a users row
-            const { error: insertError } = await supabase
-              .from('users')
-              .upsert({
-                email,
-                created_at: new Date(),
-                updated_at: new Date()
-              })
-            
-            if (insertError) {
-              console.error('Error inserting user record')
-            }
-            
-            return { 
-              email, 
-              success: true, 
-              message: 'Invitation sent successfully'
-            }
-          } catch (error) {
-            console.error('Error inviting user')
-            return { 
-              email: user.email, 
-              success: false, 
-              error: 'Unknown error during invitation'
-            }
-          }
-        })
-      )
-    )
-    
-    const successCount = results.filter(r => r.success).length
-    
-    return { 
-      success: successCount > 0,
-      results,
-      message: `Successfully sent ${successCount} of ${users.length} invitations`
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error('Error sending invitations:', error)
-    throw createError({
-      statusCode: 500,
-      statusMessage: 'Failed to send invitations',
-      data: { detail: message }
-    })
+  const body = await readBody<{ users?: Array<{ email?: unknown }> }>(event)
+  if (!Array.isArray(body?.users)) {
+    throw createError({ statusCode: 400, statusMessage: 'Users must be an array' })
   }
-}) 
+  if (body.users.length > MAX_INVITES) {
+    throw createError({ statusCode: 400, statusMessage: `At most ${MAX_INVITES} invitations at once` })
+  }
+
+  const config = useRuntimeConfig()
+  const siteUrl = config.public.siteUrl || 'https://claims.gibraltar.ca'
+  const redirectTo = `${siteUrl.replace(/\/$/, '')}/signup`
+  const admin = useSupabaseAdmin()
+
+  const results: Array<{ email: string, success: boolean, message?: string, error?: string }> = []
+
+  // One at a time, spaced out, to stay inside Supabase's email rate limit.
+  for (const [i, user] of body.users.entries()) {
+    const email = typeof user?.email === 'string' ? user.email.trim().toLowerCase() : ''
+    if (!EMAIL.test(email)) {
+      results.push({ email, success: false, error: 'Invalid email' })
+      continue
+    }
+    if (i > 0) await new Promise(resolve => setTimeout(resolve, 500))
+
+    const { error } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo })
+    results.push(error
+      ? { email, success: false, error: error.message }
+      : { email, success: true, message: 'Invitation sent successfully' })
+  }
+
+  const successCount = results.filter(r => r.success).length
+  return {
+    success: successCount > 0,
+    results,
+    message: `Successfully sent ${successCount} of ${body.users.length} invitations`,
+  }
+})

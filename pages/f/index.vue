@@ -1,11 +1,13 @@
 <script setup lang="ts">
   import { ref, computed, onMounted } from 'vue'
+  import { claimantName } from '~/lib/queueStats'
   import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
   import { Button } from '@/components/ui/button'
   import { DollarSign, Clock, CheckCircle, FileText, ArrowUpRight } from 'lucide-vue-next'
   import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
   import { toast } from '@/components/ui/toast'
   import { Skeleton } from '@/components/ui/skeleton'
+  import { parseLocalDateString } from '~/lib/utils'
   
   definePageMeta({
     layout: 'accounting',
@@ -85,7 +87,7 @@
           date,
           category_id,
           subcategory_mapping_id,
-          users!claims_employee_id_fkey(first_name, last_name, department)
+          users!claims_employee_id_fkey(first_name, last_name, email, department)
         `)
         .eq('status', 'approved')
         .order('date', { ascending: false })
@@ -152,7 +154,7 @@
   
   // Format date
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-CA', {
+    return parseLocalDateString(dateString).toLocaleDateString('en-CA', {
       year: 'numeric',
       month: 'short',
       day: 'numeric'
@@ -165,52 +167,6 @@
     const gst = parseFloat(claim.gst_amount || 0)
     const pst = parseFloat(claim.pst_amount || 0)
     return baseAmount + gst + pst
-  }
-  
-  // Mark claim as processed
-  const markAsProcessed = async (claimId) => {
-    try {
-      loading.value = true
-      
-      const { error: updateError } = await client
-        .from('claims')
-        .update({
-          status: 'completed',
-          accounting_processed_by: user.value.id,
-          accounting_processed_at: new Date().toISOString(),
-        })
-        .eq('id', claimId)
-      
-      if (updateError) throw updateError
-      
-      // Remove the processed claim from the list
-      recentClaims.value = recentClaims.value.filter(claim => claim.id !== claimId)
-      
-      // Update stats
-      const processedClaim = recentClaims.value.find(claim => claim.id === claimId)
-      if (processedClaim) {
-        const amount = getTotalAmount(processedClaim)
-        stats.value.pendingPayments--
-        stats.value.pendingAmount -= amount
-        stats.value.processedPayments++
-        stats.value.totalReimbursed += amount
-      }
-      
-      toast({
-        title: 'Success',
-        description: 'Claim marked as processed successfully',
-        variant: 'default'
-      })
-    } catch (err) {
-      console.error('Error processing claim:', err)
-      toast({
-        title: 'Error',
-        description: 'Failed to process claim',
-        variant: 'destructive'
-      })
-    } finally {
-      loading.value = false
-    }
   }
 </script>
 
@@ -373,7 +329,7 @@
                     </template>
                   </TableCell>
                   <TableCell class="text-xs py-3">
-                    {{ claim.users?.first_name }} {{ claim.users?.last_name }}
+                    {{ claimantName(claim.users) }}
                     <div class="text-muted-foreground">{{ claim.users?.department }}</div>
                   </TableCell>
                   <TableCell class="text-xs py-3">

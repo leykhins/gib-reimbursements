@@ -1,55 +1,41 @@
-import { defineEventHandler, readBody, getHeader } from 'h3'
-import { createClient } from '@supabase/supabase-js'
-
+/**
+ * The employee deletes one of their own rejected claims. Runs with the
+ * service role, so the ownership and status checks here are what keep it safe.
+ */
 export default defineEventHandler(async (event) => {
-  const config = useRuntimeConfig()
+  const caller = await requireCaller(event)
 
-  // Get the user's JWT from the Authorization header
-  const authHeader = getHeader(event, 'authorization')
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
-  }
-  const token = authHeader.replace('Bearer ', '')
-
-  const body = await readBody(event)
-  const { claimId } = body
-
+  const body = await readBody<{ claimId?: unknown }>(event)
+  const claimId = typeof body?.claimId === 'string' ? body.claimId : ''
   if (!claimId) {
     throw createError({ statusCode: 400, statusMessage: 'claimId is required' })
   }
 
-  // Use the user's token to verify ownership (respects RLS on SELECT)
-  const userClient = createClient(config.public.supabaseUrl, config.public.supabaseKey, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { autoRefreshToken: false, persistSession: false }
-  })
+  const admin = useSupabaseAdmin()
 
-  const { data: claim, error: fetchError } = await userClient
+  const { data: claim, error: fetchError } = await admin
     .from('claims')
     .select('id, status, employee_id')
     .eq('id', claimId)
-    .single()
+    .maybeSingle()
 
-  if (fetchError || !claim) {
+  if (fetchError || !claim || claim.employee_id !== caller.id) {
     throw createError({ statusCode: 404, statusMessage: 'Claim not found' })
   }
-
   if (claim.status !== 'rejected') {
     throw createError({ statusCode: 403, statusMessage: 'Only rejected claims can be deleted' })
   }
 
-  // Use service role key to bypass RLS for the actual delete
-  const adminClient = createClient(config.public.supabaseUrl, config.supabaseServiceKey, {
-    auth: { autoRefreshToken: false, persistSession: false }
-  })
-
-  const { error: deleteError } = await adminClient
+  const { error: deleteError } = await admin
     .from('claims')
     .delete()
     .eq('id', claimId)
+    .eq('employee_id', caller.id)
+    .eq('status', 'rejected')
 
   if (deleteError) {
-    throw createError({ statusCode: 500, statusMessage: deleteError.message })
+    console.error('Could not delete claim:', deleteError.message)
+    throw createError({ statusCode: 500, statusMessage: 'Could not delete claim' })
   }
 
   return { success: true }

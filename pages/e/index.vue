@@ -15,7 +15,7 @@ import { ref, onMounted, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { getReceiptSignedUrl } from '~/lib/utils'
+import { getReceiptSignedUrl, parseLocalDateString } from '~/lib/utils'
 import RejectedClaims from '@/components/RejectedClaims.vue'
 
 definePageMeta({
@@ -236,7 +236,7 @@ const formatCurrency = (amount) => {
 
 // Format date
 const formatDate = (dateString) => {
-  return new Date(dateString).toLocaleDateString('en-US', {
+  return parseLocalDateString(dateString).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
@@ -269,7 +269,7 @@ const currentMonthTotal = computed(() => {
   
   return reimbursementRequests.value
     .filter(request => {
-      const requestDate = new Date(request.date)
+      const requestDate = parseLocalDateString(request.date)
       return requestDate.getMonth() === currentMonth && requestDate.getFullYear() === currentYear
     })
     .reduce((total, request) => total + request.amount, 0)
@@ -282,7 +282,7 @@ const lastMonthTotal = computed(() => {
   
   return reimbursementRequests.value
     .filter(request => {
-      const requestDate = new Date(request.date)
+      const requestDate = parseLocalDateString(request.date)
       return requestDate.getMonth() === lastMonth && requestDate.getFullYear() === lastMonthYear
     })
     .reduce((total, request) => total + request.amount, 0)

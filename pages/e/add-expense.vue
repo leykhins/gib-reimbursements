@@ -11,6 +11,8 @@
   import { format, formatISO, parse } from 'date-fns'
   import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
   import { cn } from '@/lib/utils'
+  import { useClaimSettings } from '~/composables/useClaimSettings'
+  import { parkingGst, percentLabel } from '~/lib/claimSettings'
   import { Skeleton } from '@/components/ui/skeleton'
   import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
   import { Toaster } from '@/components/ui/toast'
@@ -44,7 +46,7 @@
   const { toast } = useToast() // Change this line to destructure toast
   const loading = ref(false)
   const error = ref('')
-  const uploadStatus = ref<Record<number, 'idle' | 'uploading' | 'success' | 'error'>>({})
+  const uploadStatus = ref<Record<number, 'idle' | 'converting' | 'uploading' | 'success' | 'error'>>({})
   const uploadProgress = ref<Record<number, number>>({})
   const receiptUrls = ref<Record<number, string>>({})
   const receiptPaths = ref<Record<number, string>>({})
@@ -56,8 +58,11 @@
   // Get the runtime config
   const config = useRuntimeConfig()
 
-  // Add a ref to store the user's mileage rate
-  const userMileageRate = ref(0.61) // Default fallback
+  // The shared rates (Rates page). Holds the seeded defaults until loaded.
+  const { settings: claimSettings, load: loadClaimSettings } = useClaimSettings()
+
+  // The user's own mileage rate, or the default rate when they have none
+  const userMileageRate = ref(claimSettings.value.defaultMileageRate)
 
   // Add function to fetch user's mileage rate
   const fetchUserMileageRate = async () => {
@@ -72,15 +77,12 @@
       
       if (error) throw error
       
-      userMileageRate.value = data.mileage_rate || 0.61
+      userMileageRate.value = Number(data.mileage_rate) || claimSettings.value.defaultMileageRate
     } catch (error) {
       console.error('Error fetching user mileage rate:', error)
       // Keep default rate on error
     }
   }
-
-  // Define constants for mileage calculation
-  // const MILEAGE_RATE = 0.61 // Remove this line
 
   // Add Google Maps API configuration - use API key from environment
   const GOOGLE_MAPS_API_KEY = config.public.googleMapsApiKey || ''
@@ -184,9 +186,9 @@
   const dbCategories = ref<any[]>([])
   const dbSubcategories = ref<any[]>([])
   const categoriesLoading = ref(true)
-  const LIVE_OUT_NIGHT_RATE = 50
-  const LIVE_OUT_MAX_NIGHTS_PER_WEEK = 5
-  const LIVE_OUT_MAX_AMOUNT_PER_WEEK = LIVE_OUT_NIGHT_RATE * LIVE_OUT_MAX_NIGHTS_PER_WEEK
+  const LIVE_OUT_NIGHT_RATE = computed(() => claimSettings.value.liveOutNightRate)
+  const LIVE_OUT_MAX_NIGHTS_PER_WEEK = computed(() => claimSettings.value.liveOutMaxNightsPerWeek)
+  const LIVE_OUT_MAX_AMOUNT_PER_WEEK = computed(() => LIVE_OUT_NIGHT_RATE.value * LIVE_OUT_MAX_NIGHTS_PER_WEEK.value)
 
   //Set the last selected date to the first expense date
   lastSelectedDate.value = expenses.value[0].date
@@ -248,7 +250,9 @@
 
   // Call the fetch function when component mounts
   onMounted(async () => {
-    await fetchUserMileageRate() // Fetch user's rate first
+    // Rates first: the user's mileage rate falls back to the default one
+    await loadClaimSettings().catch(error => console.error('Error loading claim rates:', error))
+    await fetchUserMileageRate()
     fetchCategories()
     
     if (!window.google) {
@@ -330,7 +334,7 @@
     }
 
     return Object.values(weeklyNights).reduce(
-      (sum, nights) => sum + Math.min(nights, LIVE_OUT_MAX_NIGHTS_PER_WEEK),
+      (sum, nights) => sum + Math.min(nights, LIVE_OUT_MAX_NIGHTS_PER_WEEK.value),
       0
     )
   }
@@ -399,7 +403,7 @@
 
     ensureLiveOutEndAfterStart(expense)
     const cappedNights = getCappedLiveOutNights(expense)
-    const amount = cappedNights * LIVE_OUT_NIGHT_RATE
+    const amount = cappedNights * LIVE_OUT_NIGHT_RATE.value
 
     expense.amount = amount.toFixed(2)
     expense.gst_amount = '0.00'
@@ -469,9 +473,9 @@
     
     let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
     
-    // Add 2% extra if location includes Vancouver
+    // Add the Vancouver uplift if the trip starts or ends there
     if (startLocation && destination && isVancouverLocation(startLocation, destination)) {
-      amount = amount * 1.02
+      amount = amount * (1 + claimSettings.value.vancouverMileageUplift)
     }
     
     return amount.toFixed(2)
@@ -482,9 +486,9 @@
     
     let amount = parseFloat(distance) * userMileageRate.value // Use user's rate
     
-    // Add 2% extra if location includes Vancouver
+    // Add the Vancouver uplift if the trip starts or ends there
     if (isVancouverLocation(startLocation, destination)) {
-      amount = amount * 1.02
+      amount = amount * (1 + claimSettings.value.vancouverMileageUplift)
     }
     
     return amount.toFixed(2)
@@ -592,32 +596,50 @@
     }
   }
 
+  // Matches the receipts bucket in storage, which refuses anything else with an unclear error:
+  // JPG, PNG, HEIC/HEIF (converted to JPG before upload) or PDF, up to 25 MB.
+  const MAX_RECEIPT_MB = 25
+  const assertReceiptFileType = (file: File) => {
+    const name = file.name.toLowerCase()
+    const isImage = ['image/jpeg', 'image/png', 'image/heic', 'image/heif'].includes(file.type) || /\.(jpe?g|png|heic|heif)$/.test(name)
+    const isPdf = file.type === 'application/pdf' || name.endsWith('.pdf')
+    if (!isImage && !isPdf) {
+      throw new Error('Receipts must be a JPG, PNG, HEIC or PDF file.')
+    }
+    if (file.size > MAX_RECEIPT_MB * 1024 * 1024) {
+      const mb = (file.size / 1024 / 1024).toFixed(1)
+      throw new Error(`This file is ${mb} MB. Receipts can be up to ${MAX_RECEIPT_MB} MB, so take a smaller photo or compress the PDF.`)
+    }
+  }
+
   // Add this helper function to convert HEIC files
-  const convertHeicToJpeg = async (file: File): Promise<File> => {
+  const convertHeicToJpeg = async (file: File, expenseId: number): Promise<File> => {
     if (file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
       // Only run on client side
       if (typeof window !== 'undefined') {
+        uploadStatus.value[expenseId] = 'converting'
         try {
-          // Dynamically import heic2any only when needed
-          const { default: heic2any } = await import('heic2any')
-          
-          const convertedBlob = await heic2any({
+          // Dynamically import heic-to only when needed
+          const { heicTo } = await import('heic-to')
+
+          const convertedBlob = await heicTo({
             blob: file,
-            toType: 'image/jpeg',
+            type: 'image/jpeg',
             quality: 0.8
           })
-          
+
           // Create a new File object with the converted blob
           const convertedFile = new File(
-            [convertedBlob as Blob], 
+            [convertedBlob],
             file.name.replace(/\.(heic|heif)$/i, '.jpg'),
             { type: 'image/jpeg' }
           )
-          
+
           return convertedFile
         } catch (error) {
           console.error('Error converting HEIC file:', error)
-          throw new Error('Failed to convert HEIC file. Please try again.')
+          uploadStatus.value[expenseId] = 'error'
+          throw new Error('Failed to convert HEIC file. Please try again or upload a JPG or PDF instead.')
         }
       } else {
         // On server side, just return the original file
@@ -635,14 +657,16 @@
       const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
       if (expenseIndex !== -1) {
         try {
+          assertReceiptFileType(input.files[0])
           // Convert HEIC to JPEG if needed
-          const convertedFile = await convertHeicToJpeg(input.files[0])
+          const convertedFile = await convertHeicToJpeg(input.files[0], expenseId)
           expenses.value[expenseIndex].receipt = convertedFile
-          
+
           // Start upload immediately
           await uploadFile(convertedFile, expenseId)
-        } catch (error) {
-          error.value = error.message
+        } catch (e: any) {
+          error.value = e?.message || 'Failed to upload file'
+          input.value = ''
         }
       }
     }
@@ -799,7 +823,7 @@
             
             // Add Vancouver bonus indicator to description if applicable
             if (isVancouverLocation(entry.startLocation, entry.destination)) {
-              description += ' (Vancouver +2%)';
+              description += ` (Vancouver +${percentLabel(claimSettings.value.vancouverMileageUplift)})`;
             }
             
             // Add job number to description if it exists and should be shown
@@ -1139,10 +1163,10 @@
     }, 0).toFixed(2)
   })
 
-  // Add function to calculate GST for parking expenses
+  // Parking receipts show a GST-inclusive total, so the GST is the share inside it.
   const calculateParkingGST = (amount: string): string => {
     if (!amount || isNaN(parseFloat(amount))) return '0.00'
-    return ((parseFloat(amount) / 1.29) * 0.05).toFixed(2)
+    return parkingGst(parseFloat(amount), claimSettings.value.parkingGstRate).toFixed(2)
   }
 
   // Update the handleCategoryChange function to calculate GST for parking
@@ -1338,12 +1362,13 @@
       const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
       if (expenseIndex !== -1) {
         try {
+          assertReceiptFileType(file)
           // Convert HEIC to JPEG if needed
-          const convertedFile = await convertHeicToJpeg(file)
+          const convertedFile = await convertHeicToJpeg(file, expenseId)
           expenses.value[expenseIndex].receipt = convertedFile
           await uploadFile(convertedFile, expenseId)
-        } catch (error) {
-          error.value = error.message
+        } catch (e: any) {
+          error.value = e?.message || 'Failed to upload file'
         }
       }
     }
@@ -1464,11 +1489,13 @@
       const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
       if (expenseIndex !== -1) {
         try {
-          const convertedFile = await convertHeicToJpeg(input.files[0])
+          assertReceiptFileType(input.files[0])
+          const convertedFile = await convertHeicToJpeg(input.files[0], expenseId)
           expenses.value[expenseIndex].receiptTwo = convertedFile
           await uploadSecondFile(convertedFile, expenseId)
         } catch (e: any) {
           error.value = e?.message || 'Failed to upload second file'
+          input.value = ''
         }
       }
     }
@@ -1539,7 +1566,8 @@
       const expenseIndex = expenses.value.findIndex(e => e.id === expenseId)
       if (expenseIndex !== -1) {
         try {
-          const convertedFile = await convertHeicToJpeg(file)
+          assertReceiptFileType(file)
+          const convertedFile = await convertHeicToJpeg(file, expenseId)
           expenses.value[expenseIndex].receiptTwo = convertedFile
           await uploadSecondFile(convertedFile, expenseId)
         } catch (e: any) {
@@ -2179,7 +2207,7 @@
                     type="file" 
                     :id="`receipt-${expense.id}`" 
                     class="hidden" 
-                    accept="image/*,.pdf,.heic,.heif" 
+                    accept="image/jpeg,image/png,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.heic,.heif,.pdf" 
                     @change="(e) => handleFileUpload(e, expense.id)"
                     required
                   />
@@ -2187,12 +2215,23 @@
                     <div class="flex flex-col items-center justify-center">
                       <Upload class="h-8 w-8 mb-2" :class="isDragging[expense.id] ? 'text-primary' : 'text-gray-400'" />
                       <p class="text-responsive-sm font-medium">
-                        {{ isDragging[expense.id] ? 'Drop file here' : uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click or drag file here' }}
+                        {{ isDragging[expense.id] ? 'Drop file here' : uploadStatus[expense.id] === 'converting' ? 'Converting HEIC to JPG...' : uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click or drag file here' }}
                       </p>
                       <p class="text-responsive-xs text-gray-500 mt-1">
-                        JPG, PNG or PDF (max. 10MB)
+                        JPG, PNG, HEIC or PDF (max. 25 MB)
                       </p>
                       
+                      <!-- Conversion status for upload -->
+                      <div v-if="uploadStatus[expense.id] === 'converting'" class="w-full mt-2">
+                        <div class="bg-gray-200 rounded-full h-2.5 w-full">
+                          <div class="bg-blue-600 h-2.5 rounded-full w-full animate-pulse"></div>
+                        </div>
+                        <p class="flex items-center justify-center text-responsive-xs text-gray-500 mt-1">
+                          <LoaderCircle class="h-3 w-3 mr-1 animate-spin" />
+                          Converting...
+                        </p>
+                      </div>
+
                       <!-- Progress bar for upload -->
                       <div v-if="uploadStatus[expense.id] === 'uploading'" class="w-full mt-2">
                         <div class="bg-gray-200 rounded-full h-2.5 w-full">
@@ -2259,19 +2298,30 @@
                         type="file" 
                         :id="`secondReceipt-${expense.id}`" 
                         class="hidden" 
-                        accept="image/*,.pdf,.heic,.heif" 
+                        accept="image/jpeg,image/png,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.heic,.heif,.pdf" 
                         @change="(e) => handleSecondFileUpload(e, expense.id)"
                       />
                       <label :for="`secondReceipt-${expense.id}`" class="cursor-pointer">
                         <div class="flex flex-col items-center justify-center">
                           <Upload class="h-8 w-8 mb-2" :class="isDragging[expense.id] ? 'text-primary' : 'text-gray-400'" />
                           <p class="text-responsive-sm font-medium">
-                            {{ isDragging[expense.id] ? 'Drop second receipt here' : 'Click or drag second receipt here' }}
+                            {{ isDragging[expense.id] ? 'Drop second receipt here' : uploadStatus[expense.id] === 'converting' ? 'Converting HEIC to JPG...' : uploadStatus[expense.id] === 'uploading' ? 'Uploading...' : 'Click or drag second receipt here' }}
                           </p>
                           <p class="text-responsive-xs text-gray-500 mt-1">
-                            JPG, PNG or PDF (max. 10MB)
+                            JPG, PNG, HEIC or PDF (max. 25 MB)
                           </p>
                           
+                          <!-- Conversion status for second upload -->
+                          <div v-if="uploadStatus[expense.id] === 'converting'" class="w-full mt-2">
+                            <div class="bg-gray-200 rounded-full h-2.5 w-full">
+                              <div class="bg-blue-600 h-2.5 rounded-full w-full animate-pulse"></div>
+                            </div>
+                            <p class="flex items-center justify-center text-responsive-xs text-gray-500 mt-1">
+                              <LoaderCircle class="h-3 w-3 mr-1 animate-spin" />
+                              Converting...
+                            </p>
+                          </div>
+
                           <!-- Progress bar for second upload -->
                           <div v-if="uploadStatus[expense.id] === 'uploading'" class="w-full mt-2">
                             <div class="bg-gray-200 rounded-full h-2.5 w-full">

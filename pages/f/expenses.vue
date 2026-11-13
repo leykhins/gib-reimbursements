@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { claimantName } from '~/lib/queueStats'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -20,12 +21,11 @@ import {
   User,
   Clock,
   CheckCircle,
-  Download,
   Loader2,
   MessageSquare,
-  ClockArrowDown,
   CheckCircle2,
-  XCircle
+  XCircle,
+  Sheet
 } from 'lucide-vue-next'
 import { format, endOfMonth, endOfDay, isAfter } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -44,6 +44,8 @@ import { RangeCalendar } from '@/components/ui/range-calendar'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import ReceiptViewer from '@/components/ReceiptViewer.vue'
+import AccountingExportMenu from '@/components/AccountingExportMenu.vue'
+import { downloadClaimsCsv, fileSlug } from '~/lib/claimsCsv'
 
 definePageMeta({
   layout: 'accounting',
@@ -225,7 +227,7 @@ const fetchReimbursementRequests = async (month = null, year = null) => {
       .from('claims')
       .select(`
         *,
-        profiles:employee_id(first_name, last_name, department),
+        profiles:employee_id(first_name, last_name, email, department),
         category:category_id(id, category_name),
         subcategory_mapping:subcategory_mapping_id(
           id,
@@ -303,7 +305,7 @@ const applyFilters = () => {
     
     // Employee name filter
     if (filters.value.employeeName) {
-      const fullName = `${request.profiles?.first_name} ${request.profiles?.last_name}`.toLowerCase()
+      const fullName = claimantName(request.profiles).toLowerCase()
       if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
         return false
       }
@@ -364,9 +366,7 @@ const organizedData = computed(() => {
   
   filteredRequests.value.forEach(request => {
     const employeeId = request.employee_id
-    const employeeName = request.profiles ? 
-      `${request.profiles.first_name} ${request.profiles.last_name}` : 
-      'Unknown Employee'
+    const employeeName = claimantName(request.profiles)
     const employeeDept = request.profiles?.department || 'Unknown Department'
     
     if (!organized[employeeId]) {
@@ -839,19 +839,6 @@ const getReceiptAsBase64 = async (receiptUrl: string): Promise<string | null> =>
   }
 }
 
-// Add helper function to check if employee has downloaded claims
-const hasDownloadedClaims = (employeeId) => {
-  const employee = organizedData.value[employeeId]
-  if (!employee) return false
-  
-  return Object.values(employee.categories).some(category => 
-    Object.values(category.jobGroups).some(jobGroup => 
-      jobGroup.requests.some(request => 
-        request.status === 'completed' && request.pdf_downloaded_at
-      )
-    )
-  )
-}
 
 // Add loading states for PDF generation
 const isGeneratingPDF = ref(false)
@@ -1595,25 +1582,38 @@ const generateEmployeePDF = async (employeeId, includeDownloaded = false) => {
   }
 }
 
-// Add this function to check if all claims for an employee in the selected month are completed
-const hasAllClaimsCompleted = (employeeId) => {
+// Every claim shown for an employee, for the export menu
+const employeeClaims = (employeeId) => {
   const employee = organizedData.value[employeeId]
-  if (!employee) return false
-  
-  let hasUndownloadedCompleted = false
-  
-  Object.values(employee.categories).forEach(category => {
-    Object.values(category.jobGroups).forEach(jobGroup => {
-      jobGroup.requests.forEach(request => {
-        if (request.status === 'completed' && !request.pdf_downloaded_at) {
-          hasUndownloadedCompleted = true
-        }
-      })
-    })
-  })
-  
-  return hasUndownloadedCompleted
+  if (!employee) return []
+  return Object.values(employee.categories).flatMap(category =>
+    Object.values(category.jobGroups).flatMap(jobGroup => jobGroup.requests)
+  )
 }
+
+const periodLabel = computed(() => `${selectedYear.value}-${String(selectedMonth.value + 1).padStart(2, '0')}`)
+
+const exportCsv = (claims, filename, description) => {
+  if (!claims.length) {
+    toast({ title: 'Nothing to export', description: 'No claims match the current filters.' })
+    return
+  }
+  downloadClaimsCsv(claims, filename)
+  toast({ title: 'Export ready', description })
+}
+
+const exportEmployeeCsv = (employeeId) => {
+  const employee = organizedData.value[employeeId]
+  const claims = employeeClaims(employeeId)
+  exportCsv(claims, `claims-${periodLabel.value}-${fileSlug(employee?.name || 'employee')}.csv`, `${claims.length} claim${claims.length === 1 ? '' : 's'} for ${employee?.name}.`)
+}
+
+// Every claim shown, all employees, in the order they're listed
+const exportAllCsv = () => {
+  const claims = sortedEmployeeKeys.value.flatMap(employeeClaims)
+  exportCsv(claims, `claims-${periodLabel.value}.csv`, `${claims.length} claim${claims.length === 1 ? '' : 's'} for ${months[selectedMonth.value]} ${selectedYear.value}.`)
+}
+
 
 // Add this function after toggleJob
 const hasEmployeeSelectedRequests = (employeeId) => {
@@ -1626,7 +1626,7 @@ const hasEmployeeSelectedRequests = (employeeId) => {
   )
 }
 
-// Add this function after hasAllClaimsCompleted
+// Add this function after the export helpers
 const hasAnyCompletedClaims = (employeeId) => {
   const employee = organizedData.value[employeeId]
   if (!employee) return false
@@ -1800,6 +1800,15 @@ const convertPdfToImage = async (receiptUrl: string): Promise<string | null> => 
   <div class="space-y-6">
     <div class="flex justify-between items-center">
       <h1 class="text-xl font-bold">All Expense Reimbursements</h1>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="loading || !sortedEmployeeKeys.length"
+        :title="`Every claim shown for ${months[selectedMonth]} ${selectedYear}, as a CSV`"
+        @click="exportAllCsv"
+      >
+        <Sheet class="mr-2 h-4 w-4" />Export CSV
+      </Button>
     </div>
     
     <!-- Month navigation tabs -->
@@ -2029,36 +2038,15 @@ const convertPdfToImage = async (receiptUrl: string): Promise<string | null> => 
                     <p class="text-xs text-primary-foreground/70">{{ organizedData[employeeId].department }}</p>
                 </div>
               </div>
-              <!-- Modified PDF export button to only show for employees with all completed claims -->
-              <div class="flex items-center gap-2">
-                <!-- New Claims PDF Button -->
-                <Button 
-                  v-if="hasAllClaimsCompleted(employeeId)"
-                  variant="outline" 
-                  size="sm"
-                  @click.stop="generateEmployeePDF(employeeId, false)"
+              <!-- New claims PDF, all claims PDF, or a CSV of the claims shown -->
+              <div class="ml-2" @click.stop>
+                <AccountingExportMenu
+                  :claims="employeeClaims(employeeId)"
+                  :generating="isGeneratingPDF && generatingEmployeeId === employeeId"
                   :disabled="isGeneratingPDF"
-                  class="ml-2 border-white/40 bg-white/20 hover:bg-white/30 disabled:opacity-50"
-                  title="Export New Claims to PDF"
-                >
-                  <Loader2 v-if="isGeneratingPDF && generatingEmployeeId === employeeId" class="h-4 w-4 mr-1 animate-spin" />
-                  <Download v-else class="h-4 w-4 mr-1" />
-                  PDF
-                </Button>
-                
-                <!-- Redownload Button (icon only, green style) -->
-                <Button 
-                  v-if="hasDownloadedClaims(employeeId)"
-                  variant="outline" 
-                  size="sm"
-                  @click.stop="generateEmployeePDF(employeeId, true)"
-                  :disabled="isGeneratingPDF"
-                  class="ml-1 border-green-500/40 bg-green-500/80 hover:bg-green-600/80 text-white disabled:opacity-50"
-                  title="Redownload All Claims (including previously downloaded)"
-                >
-                  <Loader2 v-if="isGeneratingPDF && generatingEmployeeId === employeeId" class="h-4 w-4 animate-spin" />
-                  <ClockArrowDown v-else class="h-4 w-4" />
-                </Button>
+                  @pdf="(includeDownloaded) => generateEmployeePDF(employeeId, includeDownloaded)"
+                  @csv="exportEmployeeCsv(employeeId)"
+                />
               </div>
             </div>
             <div class="flex items-center space-x-4">

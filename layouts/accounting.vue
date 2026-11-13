@@ -11,7 +11,8 @@ import {
   CreditCard,
   BarChart,
   X,
-  Banknote
+  Banknote,
+  Percent,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
@@ -27,6 +28,7 @@ const accountingNavItems = [
   { name: 'Dashboard', icon: Home, path: '/f/' },
   { name: 'Pending Payments', icon: Clock, path: '/f/pending' },
   { name: 'All Expenses', icon: Banknote, path: '/f/expenses' },
+  { name: 'Rates', icon: Percent, path: '/f/rates' },
 ]
 
 const toggleSidebar = () => {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
   import { ref, computed, onMounted, watch } from 'vue'
+  import { claimantName } from '~/lib/queueStats'
   import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
   import { Button } from '@/components/ui/button'
   import { Input } from '@/components/ui/input'
@@ -31,7 +32,7 @@
   import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
   import { toast } from '@/components/ui/toast'
   import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-  import { getReceiptSignedUrl } from '~/lib/utils'
+  import { getReceiptSignedUrl, parseLocalDateString } from '~/lib/utils'
 import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimRouting'
   import { Badge } from '@/components/ui/badge'
 
@@ -114,7 +115,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
       
       // Extract unique years from claims
       const uniqueYears = new Set(
-        data.map(claim => new Date(claim.date).getFullYear())
+        data.map(claim => parseLocalDateString(claim.date).getFullYear())
       )
       
       // Add current year if not present
@@ -212,7 +213,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
         .from('claims')
         .select(`
           *,
-          users:users!claims_employee_id_fkey(first_name, last_name, department, role),
+          users:users!claims_employee_id_fkey(first_name, last_name, email, department, role),
           category:category_id(id, category_name),
           subcategory_mapping:subcategory_mapping_id(
             id,
@@ -236,7 +237,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
       
       // Filter out claims that don't have valid user data
       const validClaims = (data || []).filter(claim => {
-        if (!claim.users || !claim.users.first_name || !claim.users.last_name) {
+        if (!claim.users) {
           console.warn('Filtering out claim with missing user data:', claim.id)
           return false
         }
@@ -266,7 +267,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
   const applyFilters = () => {
     filteredRequests.value = reimbursementRequests.value.filter(request => {
       // Additional safety check - ensure user data exists
-      if (!request.users || !request.users.first_name || !request.users.last_name) {
+      if (!request.users) {
         return false
       }
 
@@ -274,7 +275,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
         return false
       }
       
-      const requestDate = new Date(request.date)
+      const requestDate = parseLocalDateString(request.date)
       const requestMonth = requestDate.getMonth()
       const requestYear = requestDate.getFullYear()
       
@@ -290,7 +291,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
       
       // Employee name filter
       if (filters.value.employeeName) {
-        const fullName = `${request.users.first_name} ${request.users.last_name}`.toLowerCase()
+        const fullName = claimantName(request.users).toLowerCase()
         if (!fullName.includes(filters.value.employeeName.toLowerCase())) {
           return false
         }
@@ -327,11 +328,11 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
       const employeeId = request.employee_id
       
       // Skip if user data is missing or invalid (should not happen due to filtering above)
-      if (!request.users || !request.users.first_name || !request.users.last_name) {
+      if (!request.users) {
         return
       }
       
-      const employeeName = `${request.users.first_name} ${request.users.last_name}`
+      const employeeName = claimantName(request.users)
       const employeeDept = request.users.department || 'Unknown Department'
       
       if (!organized[employeeId]) {
@@ -435,13 +436,17 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
     return format(new Date(dateString), 'MMM d, yyyy')
   }
 
+  const formatClaimDate = (dateString) => {
+    return format(parseLocalDateString(dateString), 'MMM d, yyyy')
+  }
+
   const formatDateTime = (dateString) => {
     return format(new Date(dateString), 'MMM d, yyyy h:mm a')
   }
 
   const isLateSubmission = (expenseDate, submittedAt) => {
     if (!expenseDate || !submittedAt) return false
-    const deadline = endOfDay(addDays(endOfMonth(new Date(expenseDate)), 7))
+    const deadline = endOfDay(addDays(endOfMonth(parseLocalDateString(expenseDate)), 7))
     return isAfter(new Date(submittedAt), deadline)
   }
 
@@ -500,7 +505,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
     
     // Check if we already have data for this month/year
     const hasDataForMonth = reimbursementRequests.value.some(request => {
-      const requestDate = new Date(request.date)
+      const requestDate = parseLocalDateString(request.date)
       return requestDate.getMonth() === newMonth && requestDate.getFullYear() === selectedYear.value
     })
     
@@ -521,7 +526,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
 
     // Check if we already have data for this year
     const hasDataForYear = reimbursementRequests.value.some(request => {
-      const requestDate = new Date(request.date)
+      const requestDate = parseLocalDateString(request.date)
       return requestDate.getFullYear() === newYear
     })
 
@@ -1284,7 +1289,7 @@ import { isAdminQueueClaim, splitFirstReviewNotificationIds } from '~/lib/claimR
                                     class="white-checkbox"
                                   />
                                 </TableCell>
-                                <TableCell class="py-2">{{ formatDate(request.date) }}</TableCell>
+                                <TableCell class="py-2">{{ formatClaimDate(request.date) }}</TableCell>
                                 <TableCell class="py-2">
                                   <div class="flex items-center gap-2">
                                     <span>{{ formatDateTime(request.created_at) }}</span>
