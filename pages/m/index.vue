@@ -246,7 +246,7 @@ const fetchRecentRequests = async (department) => {
       is_travel,
       start_location,
       destination,
-      users!claims_employee_id_fkey(first_name, last_name, email, department, role),
+      users!claims_employee_id_fkey!inner(first_name, last_name, email, department, role),
       claim_categories:category_id(category_name),
       category_subcategory_mapping:subcategory_mapping_id(
         id,
