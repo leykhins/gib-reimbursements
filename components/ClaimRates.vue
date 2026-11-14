@@ -27,7 +27,7 @@ const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
 
-const form = ref({ mileageRate: '', uplift: '', parking: '', nightRate: '', maxNights: '' })
+const form = ref({ mileageRate: '', uplift: '', parking: '', nightRate: '', noKitchenRate: '', dayTripRate: '', maxNights: '' })
 
 function fillForm(s: ClaimSettings) {
   form.value = {
@@ -35,6 +35,8 @@ function fillForm(s: ClaimSettings) {
     uplift: String(Number((s.vancouverMileageUplift * 100).toFixed(2))),
     parking: String(Number((s.parkingGstRate * 100).toFixed(2))),
     nightRate: s.liveOutNightRate.toFixed(2),
+    noKitchenRate: s.liveOutWithoutKitchenRate.toFixed(2),
+    dayTripRate: s.liveOutDayTripRate.toFixed(2),
     maxNights: String(s.liveOutMaxNightsPerWeek),
   }
 }
@@ -63,18 +65,28 @@ onMounted(refresh)
 /** The form as settings, or null while any field is out of range. */
 const draft = computed<ClaimSettings | null>(() => {
   const f = form.value
-  if ([f.mileageRate, f.uplift, f.parking, f.nightRate, f.maxNights].some(v => String(v).trim() === '')) return null
+  if ([f.mileageRate, f.uplift, f.parking, f.nightRate, f.noKitchenRate, f.dayTripRate, f.maxNights].some(v => String(v).trim() === '')) return null
   const rate = Number(f.mileageRate)
   const uplift = Number(f.uplift) / 100
   const parking = Number(f.parking) / 100
   const night = Number(f.nightRate)
+  const noKitchen = Number(f.noKitchenRate)
+  const dayTrip = Number(f.dayTripRate)
   const nights = Number(f.maxNights)
   if (!(rate > 0 && rate < 10)) return null
   if (!(uplift >= 0 && uplift < 1)) return null
   if (!(parking >= 0 && parking < 1)) return null
-  if (!(night > 0)) return null
-  if (!(Number.isInteger(nights) && nights >= 1 && nights <= 5)) return null
-  return { defaultMileageRate: rate, vancouverMileageUplift: uplift, parkingGstRate: parking, liveOutNightRate: night, liveOutMaxNightsPerWeek: nights }
+  if (!(night > 0 && noKitchen > 0 && dayTrip > 0)) return null
+  if (!(Number.isInteger(nights) && nights >= 1 && nights <= 7)) return null
+  return {
+    defaultMileageRate: rate,
+    vancouverMileageUplift: uplift,
+    parkingGstRate: parking,
+    liveOutNightRate: night,
+    liveOutWithoutKitchenRate: noKitchen,
+    liveOutDayTripRate: dayTrip,
+    liveOutMaxNightsPerWeek: nights,
+  }
 })
 
 const changed = computed(() => {
@@ -85,6 +97,8 @@ const changed = computed(() => {
     d.vancouverMileageUplift !== s.vancouverMileageUplift ||
     d.parkingGstRate !== s.parkingGstRate ||
     d.liveOutNightRate !== s.liveOutNightRate ||
+    d.liveOutWithoutKitchenRate !== s.liveOutWithoutKitchenRate ||
+    d.liveOutDayTripRate !== s.liveOutDayTripRate ||
     d.liveOutMaxNightsPerWeek !== s.liveOutMaxNightsPerWeek
   )
 })
@@ -111,7 +125,12 @@ const mileageExample = computed(() => {
   return `100 km pays ${money(plain)}, or ${money(vancouver)} when the trip starts or ends in Vancouver.`
 })
 const parkingExample = computed(() => draft.value ? `A ${money(21)} parking receipt records ${money(parkingGst(21, draft.value.parkingGstRate))} GST.` : '')
-const liveOutExample = computed(() => draft.value ? `A full week pays ${money(draft.value.liveOutNightRate * draft.value.liveOutMaxNightsPerWeek)}.` : '')
+const liveOutExample = computed(() => {
+  const d = draft.value
+  if (!d) return ''
+  const n = d.liveOutMaxNightsPerWeek
+  return `A full Monday to Sunday week pays ${money(d.liveOutNightRate * n)} with a kitchen (${plural(n, 'day', 'days')} at most) or ${money(d.liveOutWithoutKitchenRate * 7)} without. A day trip pays ${money(d.liveOutDayTripRate)}.`
+})
 
 async function submit() {
   if (!draft.value || !changed.value) return
@@ -199,17 +218,25 @@ const hint = 'text-xs leading-relaxed text-muted-foreground'
           <section :class="section">
             <div>
               <h2 class="font-semibold">Live out allowance</h2>
-              <p class="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">Paid per weekday night away from home. Weekends are never paid.</p>
+              <p class="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">Overnight stays pay every day from arrival to departure, weekends included. With Kitchen pays a limited number of days each week; Without Kitchen has no limit. A day trip pays once for its date.</p>
             </div>
             <div class="space-y-4">
               <div class="grid gap-4 sm:grid-cols-2">
                 <div class="space-y-2">
-                  <Label for="rate-night">Per night ($)</Label>
+                  <Label for="rate-night">With kitchen, per day ($)</Label>
                   <Input id="rate-night" v-model="form.nightRate" type="number" inputmode="decimal" step="0.01" min="0.01" required />
                 </div>
                 <div class="space-y-2">
-                  <Label for="rate-nights">Most nights per week</Label>
-                  <Input id="rate-nights" v-model="form.maxNights" type="number" inputmode="numeric" step="1" min="1" max="5" required />
+                  <Label for="rate-no-kitchen">Without kitchen, per day ($)</Label>
+                  <Input id="rate-no-kitchen" v-model="form.noKitchenRate" type="number" inputmode="decimal" step="0.01" min="0.01" required />
+                </div>
+                <div class="space-y-2">
+                  <Label for="rate-day-trip">Day trip ($)</Label>
+                  <Input id="rate-day-trip" v-model="form.dayTripRate" type="number" inputmode="decimal" step="0.01" min="0.01" required />
+                </div>
+                <div class="space-y-2">
+                  <Label for="rate-nights">With kitchen, most days per week</Label>
+                  <Input id="rate-nights" v-model="form.maxNights" type="number" inputmode="numeric" step="1" min="1" max="7" required />
                 </div>
               </div>
               <p v-if="liveOutExample" :class="example">{{ liveOutExample }}</p>

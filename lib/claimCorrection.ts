@@ -1,7 +1,12 @@
 import { isReviewerQueueClaim } from './claimRouting'
 
-/** Categories whose amounts the form calculates, so a correction keeps the category. */
-export const CALCULATED_CATEGORIES = ['Car Mileages', 'Live Out Allowance']
+/**
+ * Categories whose amounts the form calculates, so a correction keeps the
+ * category: mileage and the three live out allowances. Matches `correct_claim()`.
+ */
+export function isCalculatedCategory(name?: string | null): boolean {
+  return name === 'Car Mileages' || (name || '').startsWith('Live Out Allowance')
+}
 
 /** A claim row as the staff queue pages load it. */
 export interface CorrectableClaim {
