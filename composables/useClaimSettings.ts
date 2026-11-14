@@ -24,6 +24,8 @@ export function useClaimSettings() {
       parking_gst_rate: next.parkingGstRate,
       live_out_night_rate: next.liveOutNightRate,
       live_out_max_nights_per_week: next.liveOutMaxNightsPerWeek,
+      live_out_day_trip_rate: next.liveOutDayTripRate,
+      live_out_without_kitchen_rate: next.liveOutWithoutKitchenRate,
     })
     if (error) throw error
     const row = data as ClaimSettingsRow & { people_moved: number }

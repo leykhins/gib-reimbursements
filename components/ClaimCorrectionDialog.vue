@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useClaimCategories } from '~/composables/useClaimCategories'
-import { CALCULATED_CATEGORIES, claimDay, type CorrectableClaim } from '~/lib/claimCorrection'
+import { claimDay, isCalculatedCategory, type CorrectableClaim } from '~/lib/claimCorrection'
 
 /**
  * Corrects the descriptive fields of a claim through `correct_claim()`, which
@@ -64,12 +64,12 @@ const today = (() => {
 const categoryName = computed(() => props.claim?.category?.category_name || '')
 
 /** Mileage, live out and other travel amounts are calculated, so those claims keep their category. */
-const fixedCategory = computed(() => !!props.claim && (!!props.claim.is_travel || CALCULATED_CATEGORIES.includes(categoryName.value)))
+const fixedCategory = computed(() => !!props.claim && (!!props.claim.is_travel || isCalculatedCategory(categoryName.value)))
 
 const categories = computed(() => {
   const seen = new Map<string, string>()
   for (const o of options.value) {
-    if (!fixedCategory.value && CALCULATED_CATEGORIES.includes(o.category)) continue
+    if (!fixedCategory.value && isCalculatedCategory(o.category)) continue
     if (fixedCategory.value && o.categoryId !== categoryId.value) continue
     seen.set(o.categoryId, o.category)
   }

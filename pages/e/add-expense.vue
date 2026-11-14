@@ -12,7 +12,7 @@
   import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
   import { cn } from '@/lib/utils'
   import { useClaimSettings } from '~/composables/useClaimSettings'
-  import { parkingGst, percentLabel } from '~/lib/claimSettings'
+  import { liveOutKind, liveOutRate, parkingGst, percentLabel } from '~/lib/claimSettings'
   import { Skeleton } from '@/components/ui/skeleton'
   import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
   import { Toaster } from '@/components/ui/toast'
@@ -186,9 +186,7 @@
   const dbCategories = ref<any[]>([])
   const dbSubcategories = ref<any[]>([])
   const categoriesLoading = ref(true)
-  const LIVE_OUT_NIGHT_RATE = computed(() => claimSettings.value.liveOutNightRate)
   const LIVE_OUT_MAX_NIGHTS_PER_WEEK = computed(() => claimSettings.value.liveOutMaxNightsPerWeek)
-  const LIVE_OUT_MAX_AMOUNT_PER_WEEK = computed(() => LIVE_OUT_NIGHT_RATE.value * LIVE_OUT_MAX_NIGHTS_PER_WEEK.value)
 
   //Set the last selected date to the first expense date
   lastSelectedDate.value = expenses.value[0].date
@@ -280,74 +278,67 @@
     return !!category && category.name.toLowerCase().includes('mileage')
   }
 
+  const expenseCategoryName = (expense: any): string =>
+    dbCategories.value.find(c => c.id === expense.categoryId)?.name || ''
+
+  // Live out comes in three categories. The two overnight kinds take a date
+  // range and pay per day of the stay; a day trip takes one date and pays a flat
+  // amount, weekends included.
   const isLiveOutAllowanceCategory = (expense: any): boolean => {
-    const category = dbCategories.value.find(c => c.id === expense.categoryId)
-    return !!category && category.name.toLowerCase().includes('live out allowance')
+    const kind = liveOutKind(expenseCategoryName(expense))
+    return kind === 'withKitchen' || kind === 'withoutKitchen'
   }
 
-  const calculateLiveOutWeekdayNights = (startDate: any, endDate: any): number => {
-    if (!startDate || !endDate) return 0
+  const isLiveOutDayTripCategory = (expense: any): boolean => liveOutKind(expenseCategoryName(expense)) === 'dayTrip'
 
-    const start = startDate.toDate(getLocalTimeZone())
-    const end = endDate.toDate(getLocalTimeZone())
-    if (end <= start) return 0
-
-    let nights = 0
-    const cursor = new Date(start)
-
-    while (cursor < end) {
-      const day = cursor.getDay()
-      if (day !== 0 && day !== 6) nights++
-      cursor.setDate(cursor.getDate() + 1)
-    }
-
-    return nights
+  /** Per night for the overnight kinds, flat for a day trip. */
+  const liveOutRateFor = (expense: any): number => {
+    const kind = liveOutKind(expenseCategoryName(expense))
+    return kind ? liveOutRate(claimSettings.value, kind) : 0
   }
 
-  const getLiveOutNights = (expense: any): number => {
-    if (!isLiveOutAllowanceCategory(expense)) return 0
-    return calculateLiveOutWeekdayNights(expense.liveOutStartDate, expense.liveOutEndDate)
-  }
+  // Overnight live out pays every calendar day of the stay, the arrival and
+  // departure days included, weekends too: Monday to Friday is 5 days.
+  // With Kitchen pays at most LIVE_OUT_MAX_NIGHTS_PER_WEEK days in each
+  // Monday to Sunday week; Without Kitchen has no limit.
+  const liveOutDaysByWeek = (expense: any): number[] => {
+    if (!isLiveOutAllowanceCategory(expense) || !expense.liveOutStartDate || !expense.liveOutEndDate) return []
+    if (expense.liveOutEndDate.compare(expense.liveOutStartDate) <= 0) return []
 
-  const getLiveOutWeeklyCappedNights = (expense: any): number => {
-    if (!isLiveOutAllowanceCategory(expense) || !expense.liveOutStartDate || !expense.liveOutEndDate) return 0
-
-    const start = expense.liveOutStartDate.toDate(getLocalTimeZone())
     const end = expense.liveOutEndDate.toDate(getLocalTimeZone())
-    if (end <= start) return 0
+    const cursor = expense.liveOutStartDate.toDate(getLocalTimeZone())
+    const weeks: Record<string, number> = {}
 
-    const weeklyNights: Record<string, number> = {}
-    const cursor = new Date(start)
-
-    while (cursor < end) {
-      const day = cursor.getDay()
-      if (day !== 0 && day !== 6) {
-        const weekStart = new Date(cursor)
-        const dayOffset = (weekStart.getDay() + 6) % 7 // Monday-start week
-        weekStart.setDate(weekStart.getDate() - dayOffset)
-        weekStart.setHours(0, 0, 0, 0)
-        const weekKey = weekStart.toISOString().slice(0, 10)
-
-        weeklyNights[weekKey] = (weeklyNights[weekKey] || 0) + 1
-      }
+    while (cursor <= end) {
+      const weekStart = new Date(cursor)
+      weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)) // Monday-start week
+      const key = format(weekStart, 'yyyy-MM-dd')
+      weeks[key] = (weeks[key] || 0) + 1
       cursor.setDate(cursor.getDate() + 1)
     }
 
-    return Object.values(weeklyNights).reduce(
-      (sum, nights) => sum + Math.min(nights, LIVE_OUT_MAX_NIGHTS_PER_WEEK.value),
+    return Object.values(weeks)
+  }
+
+  /** Every day of the stay. */
+  const getLiveOutDays = (expense: any): number => liveOutDaysByWeek(expense).reduce((sum, days) => sum + days, 0)
+
+  /** The days that are paid, after the With Kitchen weekly limit. */
+  const getPaidLiveOutDays = (expense: any): number => {
+    const capped = liveOutKind(expenseCategoryName(expense)) === 'withKitchen'
+    return liveOutDaysByWeek(expense).reduce(
+      (sum, days) => sum + (capped ? Math.min(days, LIVE_OUT_MAX_NIGHTS_PER_WEEK.value) : days),
       0
     )
-  }
-
-  const getCappedLiveOutNights = (expense: any): number => {
-    return getLiveOutWeeklyCappedNights(expense)
   }
 
   const buildLiveOutDescription = (expense: any): string => {
     const start = expense.liveOutStartDate ? format(expense.liveOutStartDate.toDate(getLocalTimeZone()), 'PPP') : ''
     const end = expense.liveOutEndDate ? format(expense.liveOutEndDate.toDate(getLocalTimeZone()), 'PPP') : ''
-    const nights = getCappedLiveOutNights(expense)
-    return `Live Out Allowance: ${nights} weekday night${nights === 1 ? '' : 's'} (${start} to ${end})`
+    const paid = getPaidLiveOutDays(expense)
+    const total = getLiveOutDays(expense)
+    const unpaid = total > paid ? `, ${total - paid} over the weekly limit not paid` : ''
+    return `${expenseCategoryName(expense)}: ${paid} day${paid === 1 ? '' : 's'} (${start} to ${end}${unpaid})`
   }
 
   const ensureLiveOutEndAfterStart = (expense: any) => {
@@ -365,10 +356,9 @@
     if (expense.liveOutEndDate.compare(expense.liveOutStartDate) <= 0) {
       return 'Live Out Allowance end date must be after the start date.'
     }
-    const nights = getCappedLiveOutNights(expense)
     const amount = parseFloat(expense.amount) || 0
-    if (nights <= 0 || amount <= 0) {
-      return 'Live Out Allowance must include at least one eligible weekday night.'
+    if (getPaidLiveOutDays(expense) <= 0 || amount <= 0) {
+      return 'Live Out Allowance must include at least one paid day.'
     }
     return null
   }
@@ -399,11 +389,15 @@
     if (expenseIndex === -1) return
 
     const expense = expenses.value[expenseIndex]
-    if (!isLiveOutAllowanceCategory(expense)) return
-
-    ensureLiveOutEndAfterStart(expense)
-    const cappedNights = getCappedLiveOutNights(expense)
-    const amount = cappedNights * LIVE_OUT_NIGHT_RATE.value
+    let amount: number
+    if (isLiveOutDayTripCategory(expense)) {
+      amount = liveOutRateFor(expense)
+    } else if (isLiveOutAllowanceCategory(expense)) {
+      ensureLiveOutEndAfterStart(expense)
+      amount = getPaidLiveOutDays(expense) * liveOutRateFor(expense)
+    } else {
+      return
+    }
 
     expense.amount = amount.toFixed(2)
     expense.gst_amount = '0.00'
@@ -864,6 +858,11 @@
             // Always regenerate hidden live-out description from selected dates.
             expense.description = buildLiveOutDescription(expense)
           }
+          if (isLiveOutDayTripCategory(expense)) {
+            // The flat rate, recalculated so a rate change after the category was picked still applies.
+            updateLiveOutAmount(expense.id)
+            expense.description = `${expenseCategoryName(expense)}: ${format(expense.date.toDate(getLocalTimeZone()), 'PPP')}`
+          }
           if (categoryName.includes('meal') && !expense.description) {
             expense.description = 'Meal expense';
           }
@@ -1185,8 +1184,7 @@
         expenses.value[expenseIndex].gst_amount = calculateParkingGST(expense.amount)
       }
 
-      if (categoryName.includes('live out allowance')) {
-        ensureLiveOutEndAfterStart(expenses.value[expenseIndex])
+      if (liveOutKind(category.name)) {
         updateLiveOutAmount(expenseId)
       }
     }
@@ -1899,17 +1897,23 @@
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 p-4 bg-gray-50 rounded-md">
                   <div class="space-y-2">
-                    <Label class="flex items-center font-semibold">Eligible Weekday Nights</Label>
-                    <Input :value="getCappedLiveOutNights(expense)" readonly class="bg-gray-100 font-bold" />
+                    <Label class="flex items-center font-semibold">Days Paid</Label>
+                    <Input :value="getPaidLiveOutDays(expense)" readonly class="bg-gray-100 font-bold" />
                     <p class="text-xs text-gray-500">
-                      Weekends are excluded. Maximum {{ LIVE_OUT_MAX_NIGHTS_PER_WEEK }} nights per week.
+                      Every day from start to end, weekends included.
+                      <template v-if="liveOutKind(expenseCategoryName(expense)) === 'withKitchen'">
+                        Maximum {{ LIVE_OUT_MAX_NIGHTS_PER_WEEK }} days per week (Monday to Sunday).
+                        <span v-if="getLiveOutDays(expense) > getPaidLiveOutDays(expense)" class="font-medium text-orange-700">
+                          {{ getLiveOutDays(expense) - getPaidLiveOutDays(expense) }} over the limit not paid.
+                        </span>
+                      </template>
                     </p>
                   </div>
                   <div class="space-y-2">
                     <Label class="flex items-center font-semibold">Total Amount ($)</Label>
                     <Input :value="expense.amount" readonly class="bg-gray-100 font-bold" />
                     <p class="text-xs text-gray-500">
-                      ${{ LIVE_OUT_NIGHT_RATE }} per night. Maximum ${{ LIVE_OUT_MAX_AMOUNT_PER_WEEK }} per week.
+                      ${{ liveOutRateFor(expense) }} per day.<template v-if="liveOutKind(expenseCategoryName(expense)) === 'withKitchen'"> Maximum ${{ liveOutRateFor(expense) * LIVE_OUT_MAX_NIGHTS_PER_WEEK }} per week.</template>
                     </p>
                   </div>
                 </div>
@@ -1955,8 +1959,21 @@
                 />
               </div>
               
+              <!-- Live Out Allowance (Day Trip): a flat amount for the date above -->
+              <div v-if="isLiveOutDayTripCategory(expense)" class="space-y-2 md:col-span-2">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-md">
+                  <div class="space-y-2">
+                    <Label class="flex items-center font-semibold">Total Amount ($)</Label>
+                    <Input :value="expense.amount" readonly class="bg-gray-100 font-bold" />
+                    <p class="text-xs text-gray-500">
+                      ${{ liveOutRateFor(expense) }} per day trip. Claim each day trip separately.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <!-- Regular expense fields -->
-              <div v-if="!expense.categoryId || (!isMileageCategory(expense) && !isLiveOutAllowanceCategory(expense))" class="space-y-2 md:col-span-2">
+              <div v-if="!expense.categoryId || (!isMileageCategory(expense) && !isLiveOutAllowanceCategory(expense) && !isLiveOutDayTripCategory(expense))" class="space-y-2 md:col-span-2">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <!-- Amount -->
                   <div class="space-y-2">
