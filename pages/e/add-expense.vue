@@ -1594,27 +1594,19 @@
       <Dialog v-if="hasLateClaims" :open="showLateSubmissionModal" @update:open="showLateSubmissionModal = $event">
         <DialogContent class="w-[520px] max-w-[92vw] border-red-700 text-red-700">
           <DialogHeader>
-            <DialogTitle class="text-red-700 flex items-center gap-2"> <AlertTriangle class="h-5 w-5 text-red-700" /> Late Submission Warning</DialogTitle>
+            <DialogTitle class="text-red-700 flex items-center gap-2"> <AlertTriangle class="h-5 w-5 text-red-700" /> Late Submission Reminder</DialogTitle>
             <DialogDescription class="text-red-700">
-              This reimbursement has exceeded the submission deadline: <span class="font-bold">7 days after the previous month.</span>
+              This expense is past the submission deadline: <span class="font-bold">3 days after the end of the month it was incurred.</span>
             </DialogDescription>
           </DialogHeader>
           <div class="text-sm">
-            <p>
-              In addition to submitting the request, please send a separate email to the following people in the processing chain to ensure that this reimbursement can be processed retroactively:
-            </p>
-            <ol class="mt-2 list-decimal list-inside pl-4">
-              <li>Chloe</li>
-              <li>Your Manager</li>
-              <li>Mabel</li>
-            </ol>
-            <p class="mt-3 font-semibold">Please note:</p>
+            <p class="font-semibold">Please note:</p>
             <ul class="mt-1 list-disc list-inside space-y-1 pl-4">
               <li>Late submissions create extra work and delays in processing expenses.</li>
               <li>Our team does not regularly monitor previous months&apos; records to check for items submitted late.</li>
-              <li>All reimbursements must be submitted on time. This policy applies to all expenses, including non-job-related expenses.</li>
+              <li>This deadline applies to all expenses, including non-job-related expenses.</li>
             </ul>
-            <p class="mt-3">Thank you for your cooperation in following the deadlines.</p>
+            <p class="mt-3">Please submit by the deadline going forward.</p>
           </div>
           <DialogFooter>
             <Button class="w-full bg-red-700 text-white hover:bg-red-800" @click="showLateSubmissionModal = false">Close</Button>
