@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar'
 import { addDays } from 'date-fns'
 import { cn } from '@/lib/utils'
-import { getReceiptSignedUrl, parseLocalDateString, computeMonthlyClaimStatus, mergeMonthlyClaimStatus } from '~/lib/utils'
+import { getReceiptSignedUrl, parseLocalDateString, mergeMonthlyClaimStatus, fetchMonthlyClaimCounts, completionStatusFromCounts } from '~/lib/utils'
 
 import { 
   CalendarIcon, 
@@ -670,21 +670,7 @@ const monthlyStatusIndicators = ref({})
 // Fetch monthly status indicators for all months in the selected year
 const fetchMonthlyStatusIndicators = async () => {
   try {
-    // Calculate date range for the entire year
-    const startDateStr = `${selectedYear.value}-01-01`
-    const endDateStr = `${selectedYear.value + 1}-01-01`
-    
-    // Fetch only date and status for all claims in this year, excluding rejected
-    const { data, error } = await client
-      .from('claims')
-      .select('date, status')
-      .neq('status', 'rejected') // Exclude rejected claims
-      .gte('date', startDateStr)
-      .lt('date', endDateStr)
-    
-    if (error) throw error
-    
-    monthlyStatusIndicators.value = computeMonthlyClaimStatus(data || [], selectedYear.value)
+    monthlyStatusIndicators.value = completionStatusFromCounts(await fetchMonthlyClaimCounts(client, selectedYear.value))
   } catch (err) {
     console.error('Error fetching monthly status indicators:', err)
   }

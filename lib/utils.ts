@@ -62,6 +62,51 @@ export function parseLocalDateString(dateString: string): Date {
 
 export type MonthlyClaimStatusValue = 'completed' | 'has-claims' | undefined
 
+export interface MonthlyClaimCounts { month: number; total: number; pending: number; completed: number }
+
+/**
+ * Per-month claim counts for a year, from the monthly_claim_status() database
+ * function (rejected claims excluded). `month` is 1-12 as the database sends it.
+ * Pass employeeIds to count only those employees' claims.
+ */
+export async function fetchMonthlyClaimCounts(
+  client: any,
+  year: number,
+  employeeIds: string[] | null = null
+): Promise<MonthlyClaimCounts[]> {
+  const { data, error } = await client.rpc('monthly_claim_status', {
+    p_year: year,
+    p_employee_ids: employeeIds
+  })
+  if (error) throw error
+  return (data || []).map((r: any) => ({
+    month: Number(r.month),
+    total: Number(r.total),
+    pending: Number(r.pending),
+    completed: Number(r.completed)
+  }))
+}
+
+/** Finance and employee dots: green when every claim in the month is completed, red otherwise. */
+export function completionStatusFromCounts(counts: MonthlyClaimCounts[], monthCount = 12): Record<number, MonthlyClaimStatusValue> {
+  const status: Record<number, MonthlyClaimStatusValue> = {}
+  for (let i = 0; i < monthCount; i++) status[i] = undefined
+  counts.forEach((c) => {
+    if (c.total > 0) status[c.month - 1] = c.total === c.completed ? 'completed' : 'has-claims'
+  })
+  return status
+}
+
+/** Approval page dots: red when any claim is pending, green when the rest have moved on. */
+export function reviewStatusFromCounts(counts: MonthlyClaimCounts[], monthCount = 12): Record<number, 'pending' | 'verified' | undefined> {
+  const status: Record<number, 'pending' | 'verified' | undefined> = {}
+  for (let i = 0; i < monthCount; i++) status[i] = undefined
+  counts.forEach((c) => {
+    if (c.total > 0) status[c.month - 1] = c.pending > 0 ? 'pending' : 'verified'
+  })
+  return status
+}
+
 /**
  * Computes per-month status dots for a year from claim date + status.
  * Rejected claims are excluded. Green (completed) only when all claims in the month are completed.
