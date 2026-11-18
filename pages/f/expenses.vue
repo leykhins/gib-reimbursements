@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar'
 import { addDays } from 'date-fns'
 import { cn } from '@/lib/utils'
-import { getReceiptSignedUrl, parseLocalDateString, computeMonthlyClaimStatus, mergeMonthlyClaimStatus } from '~/lib/utils'
+import { getReceiptSignedUrl, parseLocalDateString, computeMonthlyClaimStatus, mergeMonthlyClaimStatus, fetchAllRows } from '~/lib/utils'
 
 import { 
   CalendarIcon, 
@@ -675,14 +675,14 @@ const fetchMonthlyStatusIndicators = async () => {
     const endDateStr = `${selectedYear.value + 1}-01-01`
     
     // Fetch only date and status for all claims in this year, excluding rejected
-    const { data, error } = await client
+    const data = await fetchAllRows((from, to) => client
       .from('claims')
       .select('date, status')
       .neq('status', 'rejected') // Exclude rejected claims
       .gte('date', startDateStr)
       .lt('date', endDateStr)
-    
-    if (error) throw error
+      .order('id')
+      .range(from, to))
     
     monthlyStatusIndicators.value = computeMonthlyClaimStatus(data || [], selectedYear.value)
   } catch (err) {

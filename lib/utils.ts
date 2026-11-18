@@ -60,6 +60,24 @@ export function parseLocalDateString(dateString: string): Date {
   return parseDate(dateString.split('T')[0]).toDate(getLocalTimeZone())
 }
 
+/**
+ * Supabase returns at most 1000 rows per request, silently. Reads a whole result
+ * set by paging through it. `buildQuery` gets the row range for each page and
+ * must order by a unique column so the pages do not overlap.
+ */
+export async function fetchAllRows<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
+  pageSize = 1000
+): Promise<T[]> {
+  const rows: T[] = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...(data || []))
+    if (!data || data.length < pageSize) return rows
+  }
+}
+
 export type MonthlyClaimStatusValue = 'completed' | 'has-claims' | undefined
 
 /**

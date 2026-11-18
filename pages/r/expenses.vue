@@ -32,7 +32,7 @@
   import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
   import { toast } from '@/components/ui/toast'
   import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-  import { getReceiptSignedUrl, parseLocalDateString } from '~/lib/utils'
+  import { getReceiptSignedUrl, parseLocalDateString, fetchAllRows } from '~/lib/utils'
 import { isReviewerQueueClaim } from '~/lib/claimRouting'
   import { Badge } from '@/components/ui/badge'
 
@@ -663,14 +663,14 @@ import { isReviewerQueueClaim } from '~/lib/claimRouting'
       const endDateStr = `${selectedYear.value + 1}-01-01`
       
       // Fetch all claims except rejected to see what statuses exist
-      const { data: allData, error: allError } = await client
+      const allData = await fetchAllRows((from, to) => client
         .from('claims')
         .select('date, status')
         .neq('status', 'rejected')
         .gte('date', startDateStr)
         .lt('date', endDateStr)
-      
-      if (allError) throw allError
+        .order('id')
+        .range(from, to))
       
       // Initialize all months
       const status = {}
