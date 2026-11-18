@@ -446,7 +446,7 @@ import { isReviewerQueueClaim } from '~/lib/claimRouting'
 
   const isLateSubmission = (expenseDate, submittedAt) => {
     if (!expenseDate || !submittedAt) return false
-    const deadline = endOfDay(addDays(endOfMonth(parseLocalDateString(expenseDate)), 7))
+    const deadline = endOfDay(addDays(endOfMonth(parseLocalDateString(expenseDate)), 3))
     return isAfter(new Date(submittedAt), deadline)
   }
 

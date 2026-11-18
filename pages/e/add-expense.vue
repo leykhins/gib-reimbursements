@@ -1387,8 +1387,8 @@
       nextYear++
     }
     
-    // Deadline is 7 days into the next month
-    return new Date(nextYear, nextMonth, 7, 23, 59, 59)
+    // Deadline is 3 days into the next month
+    return new Date(nextYear, nextMonth, 3, 23, 59, 59)
   }
 
   // Computed property to check if any claims are late

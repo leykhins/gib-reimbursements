@@ -356,7 +356,7 @@ const formatDateTime = (date) => {
 const isLateSubmission = (expenseDate, submittedAt) => {
   if (!expenseDate || !submittedAt) return false
   const localExpenseDate = parseLocalDateString(expenseDate)
-  const deadline = endOfDay(addDays(endOfMonth(localExpenseDate), 7))
+  const deadline = endOfDay(addDays(endOfMonth(localExpenseDate), 3))
   return isAfter(new Date(submittedAt), deadline)
 }
 
