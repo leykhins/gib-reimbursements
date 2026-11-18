@@ -32,7 +32,7 @@ import { format, addDays, endOfMonth, endOfDay, isAfter } from 'date-fns'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { getReceiptSignedUrl, parseLocalDateString, fetchAllRows } from '~/lib/utils'
+import { getReceiptSignedUrl, parseLocalDateString, fetchMonthlyClaimCounts, reviewStatusFromCounts } from '~/lib/utils'
 import { skipsManagerApproval } from '~/lib/claimRouting'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
@@ -847,52 +847,7 @@ const fetchMonthlyStatusIndicators = async () => {
     const employeeIds = departmentEmployees?.map(emp => emp.id) || []
     if (employeeIds.length === 0) return
     
-    // Calculate date range for the entire year
-    const startDateStr = `${selectedYear.value}-01-01`
-    const endDateStr = `${selectedYear.value + 1}-01-01`
-    
-    // Fetch all claims except rejected to see what statuses exist
-    const data = await fetchAllRows((from, to) => client
-      .from('claims')
-      .select('date, status')
-      .in('employee_id', employeeIds)
-      .neq('status', 'rejected')
-      .gte('date', startDateStr)
-      .lt('date', endDateStr)
-      .order('id')
-      .range(from, to))
-    
-    // Initialize all months
-    const status = {}
-    months.forEach((_, index) => {
-      status[index] = undefined
-    })
-    
-    // Process the status data - parse date string directly to avoid timezone issues
-    // Prioritize pending over verified, but also include approved/completed as verified
-    if (data) {
-      data.forEach(claim => {
-        // Parse date string directly (YYYY-MM-DD format)
-        const dateParts = claim.date.split('-')
-        if (dateParts.length === 3) {
-          const year = parseInt(dateParts[0], 10)
-          const month = parseInt(dateParts[1], 10) - 1 // Convert to 0-based month index
-          
-          if (year === selectedYear.value) {
-            if (claim.status === 'pending') {
-              status[month] = 'pending'
-            } else if (claim.status === 'verified' && status[month] !== 'pending') {
-              status[month] = 'verified'
-            } else if (['approved', 'completed'].includes(claim.status) && status[month] !== 'pending' && status[month] !== 'verified') {
-              // Show approved/completed as verified status
-              status[month] = 'verified'
-            }
-          }
-        }
-      })
-    }
-    
-    monthlyStatusIndicators.value = status
+    monthlyStatusIndicators.value = reviewStatusFromCounts(await fetchMonthlyClaimCounts(client, selectedYear.value, employeeIds))
   } catch (err) {
     console.error('Error fetching monthly status indicators:', err)
   }

@@ -60,25 +60,52 @@ export function parseLocalDateString(dateString: string): Date {
   return parseDate(dateString.split('T')[0]).toDate(getLocalTimeZone())
 }
 
+export type MonthlyClaimStatusValue = 'completed' | 'has-claims' | undefined
+
+export interface MonthlyClaimCounts { month: number; total: number; pending: number; completed: number }
+
 /**
- * Supabase returns at most 1000 rows per request, silently. Reads a whole result
- * set by paging through it. `buildQuery` gets the row range for each page and
- * must order by a unique column so the pages do not overlap.
+ * Per-month claim counts for a year, from the monthly_claim_status() database
+ * function (rejected claims excluded). `month` is 1-12 as the database sends it.
+ * Pass employeeIds to count only those employees' claims.
  */
-export async function fetchAllRows<T>(
-  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
-  pageSize = 1000
-): Promise<T[]> {
-  const rows: T[] = []
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await buildQuery(from, from + pageSize - 1)
-    if (error) throw error
-    rows.push(...(data || []))
-    if (!data || data.length < pageSize) return rows
-  }
+export async function fetchMonthlyClaimCounts(
+  client: any,
+  year: number,
+  employeeIds: string[] | null = null
+): Promise<MonthlyClaimCounts[]> {
+  const { data, error } = await client.rpc('monthly_claim_status', {
+    p_year: year,
+    p_employee_ids: employeeIds
+  })
+  if (error) throw error
+  return (data || []).map((r: any) => ({
+    month: Number(r.month),
+    total: Number(r.total),
+    pending: Number(r.pending),
+    completed: Number(r.completed)
+  }))
 }
 
-export type MonthlyClaimStatusValue = 'completed' | 'has-claims' | undefined
+/** Finance and employee dots: green when every claim in the month is completed, red otherwise. */
+export function completionStatusFromCounts(counts: MonthlyClaimCounts[], monthCount = 12): Record<number, MonthlyClaimStatusValue> {
+  const status: Record<number, MonthlyClaimStatusValue> = {}
+  for (let i = 0; i < monthCount; i++) status[i] = undefined
+  counts.forEach((c) => {
+    if (c.total > 0) status[c.month - 1] = c.total === c.completed ? 'completed' : 'has-claims'
+  })
+  return status
+}
+
+/** Approval page dots: red when any claim is pending, green when the rest have moved on. */
+export function reviewStatusFromCounts(counts: MonthlyClaimCounts[], monthCount = 12): Record<number, 'pending' | 'verified' | undefined> {
+  const status: Record<number, 'pending' | 'verified' | undefined> = {}
+  for (let i = 0; i < monthCount; i++) status[i] = undefined
+  counts.forEach((c) => {
+    if (c.total > 0) status[c.month - 1] = c.pending > 0 ? 'pending' : 'verified'
+  })
+  return status
+}
 
 /**
  * Computes per-month status dots for a year from claim date + status.
