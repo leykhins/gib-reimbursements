@@ -10,6 +10,7 @@ export interface Caller {
   department: string | null
   first_name: string | null
   last_name: string | null
+  deactivated_at: string | null
 }
 
 let adminClient: SupabaseClient | null = null
@@ -51,12 +52,18 @@ export async function requireCaller(event: H3Event, roles?: Role[]): Promise<Cal
 
   const { data: profile, error: profileError } = await admin
     .from('users')
-    .select('id, email, role, department, first_name, last_name')
+    .select('id, email, role, department, first_name, last_name, deactivated_at')
     .eq('id', authData.user.id)
     .single()
 
   if (profileError || !profile) {
     throw createError({ statusCode: 403, statusMessage: 'No profile for this account' })
+  }
+
+  // The sign-in ban stops new sessions; this stops a session that was
+  // already open when they were deactivated.
+  if (profile.deactivated_at) {
+    throw createError({ statusCode: 403, statusMessage: 'This account has been deactivated' })
   }
 
   if (roles && (!profile.role || !roles.includes(profile.role as Role))) {

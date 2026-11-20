@@ -18,9 +18,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: `At most ${MAX_INVITES} invitations at once` })
   }
 
-  const config = useRuntimeConfig()
-  const siteUrl = config.public.siteUrl || 'https://claims.gibraltar.ca'
-  const redirectTo = `${siteUrl.replace(/\/$/, '')}/signup`
+  const redirectTo = inviteRedirectUrl()
   const admin = useSupabaseAdmin()
 
   const results: Array<{ email: string, success: boolean, message?: string, error?: string }> = []

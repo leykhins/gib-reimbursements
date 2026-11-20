@@ -21,7 +21,10 @@ import {
   XIcon,
   ChevronLeft,
   ChevronRight,
-  Filter
+  Filter,
+  MailPlus,
+  UserX,
+  UserCheck
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -222,6 +225,54 @@ const fetchUsers = async () => {
   }
 }
 
+// People invited who have not opened their invite link yet: id -> invited date
+const pendingInvites = ref<Map<string, string | null>>(new Map())
+const resendingInvites = ref<Set<string>>(new Set())
+const deletingUsers = ref<Set<string>>(new Set())
+const togglingActive = ref<Set<string>>(new Set())
+// useSupabaseUser() gives JWT claims (sub) in newer @nuxtjs/supabase versions
+const currentUserId = computed(() => user.value?.id ?? user.value?.sub)
+const savingPassword = ref(false)
+
+const fetchPendingInvites = async () => {
+  try {
+    const { pending } = await $fetch('/api/admin/pending-invites', { headers: await authHeaders() })
+    pendingInvites.value = new Map(pending.map(p => [p.id, p.invitedAt]))
+  } catch (error) {
+    // The list still works without the badges, so don't block the page
+    console.error('Error loading pending invites:', error)
+  }
+}
+
+const formatInviteDate = (value: string | null) =>
+  value ? new Date(value).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : 'an unknown date'
+
+const resendInvite = async (u) => {
+  resendingInvites.value.add(u.id)
+  try {
+    await $fetch('/api/admin/resend-invite', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: { userId: u.id },
+    })
+    pendingInvites.value.set(u.id, new Date().toISOString())
+    toast({
+      title: 'Invite sent',
+      description: `A new invite link is on its way to ${u.email}. It works for 24 hours.`,
+    })
+  } catch (error) {
+    toast({
+      title: 'Could not resend the invite',
+      description: error?.data?.statusMessage || error?.statusMessage || error?.message || 'Unknown error',
+      variant: 'destructive',
+    })
+    // Their status may have changed (e.g. they accepted in the meantime)
+    fetchPendingInvites()
+  } finally {
+    resendingInvites.value.delete(u.id)
+  }
+}
+
 // Get unique departments from users
 const availableDepartments = computed(() => {
   const departments = users.value
@@ -268,6 +319,11 @@ const paginatedUsers = computed(() => {
 // Total pages
 const totalPages = computed(() => {
   return Math.ceil(filteredUsers.value.length / itemsPerPage)
+})
+
+// Stay on a real page when the list shrinks, e.g. after deleting the last row on the last page
+watch(totalPages, (pages) => {
+  if (currentPage.value > pages) currentPage.value = Math.max(1, pages)
 })
 
 // Generate array of page numbers for pagination
@@ -453,22 +509,29 @@ const saveNewPassword = async () => {
     return
   }
   
+  // The dialog can be closed and reopened for someone else while this is in flight
+  const target = selectedUser.value
+  savingPassword.value = true
   try {
-    // This would require admin functions in Supabase or a server endpoint
-    toast({
-      title: 'Success',
-      description: 'Password updated successfully',
-      variant: 'default'
+    await $fetch('/api/admin/set-password', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: { userId: target.id, password: passwordForm.value.password },
     })
-    
-    showPasswordDialog.value = false
+    toast({
+      title: 'Password updated',
+      description: `${target.email} can now sign in with the new password.`,
+    })
+    if (selectedUser.value?.id === target.id) showPasswordDialog.value = false
   } catch (error) {
     console.error('Error updating password:', error)
     toast({
-      title: 'Error',
-      description: 'Failed to update password',
+      title: 'Could not update the password',
+      description: error?.data?.statusMessage || error?.statusMessage || error?.message || 'Unknown error',
       variant: 'destructive'
     })
+  } finally {
+    savingPassword.value = false
   }
 }
 
@@ -560,25 +623,75 @@ const addNewUser = async () => {
 }
 
 // Delete user
-const deleteUser = async (userId) => {
-  if (!confirm('Are you sure you want to delete this user?')) return
-  
+// Former employees: block sign-in and claim emails, keep all their claims.
+const toggleActive = async (u) => {
+  const deactivate = !u.deactivated_at
+  const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email
+  const question = deactivate
+    ? `Deactivate ${name}? They won't be able to sign in or get claim emails. Their claims stay as they are, and you can reactivate them later.`
+    : `Reactivate ${name}? They'll be able to sign in again with their old password.`
+  if (!confirm(question)) return
+
+  togglingActive.value.add(u.id)
   try {
-    // This would require admin functions in Supabase or a server endpoint
-    toast({
-      title: 'Success',
-      description: 'User deleted successfully',
-      variant: 'default'
+    const result = await $fetch('/api/admin/deactivate-user', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: { userId: u.id, deactivate },
     })
-    
+    u.deactivated_at = result.deactivatedAt
+    toast({
+      title: deactivate ? 'User deactivated' : 'User reactivated',
+      description: deactivate
+        ? `${u.email} can no longer sign in.`
+        : `${u.email} can sign in again.`,
+    })
+    if (result.noOneLeft) {
+      toast({
+        title: 'Nobody else has this role',
+        description: `${name} was the last active ${result.noOneLeft}. Give someone else that role so claims don't wait on nobody.`,
+        variant: 'destructive',
+      })
+    }
+  } catch (error) {
+    console.error('Error changing user status:', error)
+    toast({
+      title: deactivate ? 'Could not deactivate this user' : 'Could not reactivate this user',
+      description: error?.data?.statusMessage || error?.statusMessage || error?.message || 'Unknown error',
+      variant: 'destructive'
+    })
+  } finally {
+    togglingActive.value.delete(u.id)
+  }
+}
+
+// Only accounts with no claims or other history can be deleted; the server checks.
+const deleteUser = async (u) => {
+  const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email
+  if (!confirm(`Delete ${name} (${u.email})? They will no longer be able to sign in. This can't be undone.`)) return
+
+  deletingUsers.value.add(u.id)
+  try {
+    await $fetch('/api/admin/delete-user', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: { userId: u.id },
+    })
+    toast({
+      title: 'User deleted',
+      description: `${u.email} has been removed.`,
+    })
+    pendingInvites.value.delete(u.id)
     fetchUsers()
   } catch (error) {
     console.error('Error deleting user:', error)
     toast({
-      title: 'Error',
-      description: 'Failed to delete user',
+      title: 'Could not delete this user',
+      description: error?.data?.statusMessage || error?.statusMessage || error?.message || 'Unknown error',
       variant: 'destructive'
     })
+  } finally {
+    deletingUsers.value.delete(u.id)
   }
 }
 
@@ -691,7 +804,7 @@ onMounted(async () => {
   await checkAdminStatus()
   if (isAdmin.value) {
     loadClaimSettings().catch(error => console.error('Error loading claim rates:', error))
-    await fetchUsers()
+    await Promise.all([fetchUsers(), fetchPendingInvites()])
   }
 })
 
@@ -777,13 +890,27 @@ definePageMeta({
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="user in paginatedUsers" :key="user.id">
+              <TableRow v-for="user in paginatedUsers" :key="user.id" :class="{ 'text-muted-foreground': user.deactivated_at }">
                 <TableCell>
                   <div class="flex items-center gap-3">
                     <Avatar size="sm" shape="circle" class="text-white">
                       <AvatarFallback>{{ getUserInitials(user) }}</AvatarFallback>
                     </Avatar>
                     <span class="font-medium">{{ user.first_name }} {{ user.last_name }}</span>
+                    <span
+                      v-if="pendingInvites.has(user.id)"
+                      class="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200 whitespace-nowrap"
+                      :title="`Invited ${formatInviteDate(pendingInvites.get(user.id))}, not accepted yet`"
+                    >
+                      Invite pending
+                    </span>
+                    <span
+                      v-if="user.deactivated_at"
+                      class="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200 whitespace-nowrap"
+                      :title="`Deactivated ${formatInviteDate(user.deactivated_at)}`"
+                    >
+                      Deactivated
+                    </span>
                   </div>
                 </TableCell>
                 <TableCell>{{ user.email }}</TableCell>
@@ -804,14 +931,58 @@ definePageMeta({
                 <TableCell>{{ new Date(user.created_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) }}</TableCell>
                 <TableCell>
                   <div class="flex justify-end gap-2">
+                    <Button
+                      v-if="pendingInvites.has(user.id) && !user.deactivated_at"
+                      class="shadow-none"
+                      variant="outline"
+                      size="icon"
+                      title="Resend invite"
+                      aria-label="Resend invite"
+                      :disabled="resendingInvites.has(user.id)"
+                      @click="resendInvite(user)"
+                    >
+                      <Loader2 v-if="resendingInvites.has(user.id)" class="h-4 w-4 animate-spin" />
+                      <MailPlus v-else class="h-4 w-4" />
+                    </Button>
                     <Button class="shadow-none" variant="outline" size="icon" @click="editUser(user)">
                       <PenLine class="h-4 w-4" />
                     </Button>
-                    <Button class="shadow-none" variant="outline" size="icon" @click="changePassword(user)">
+                    <Button
+                      v-if="!pendingInvites.has(user.id) && !user.deactivated_at"
+                      class="shadow-none"
+                      variant="outline"
+                      size="icon"
+                      title="Change password"
+                      aria-label="Change password"
+                      @click="changePassword(user)"
+                    >
                       <Key class="h-4 w-4" />
                     </Button>
-                    <Button class="shadow-none" variant="outline" size="icon" @click="deleteUser(user.id)">
-                      <Trash2 class="h-4 w-4" />
+                    <Button
+                      v-if="user.id !== currentUserId"
+                      class="shadow-none"
+                      variant="outline"
+                      size="icon"
+                      :title="user.deactivated_at ? 'Reactivate user' : 'Deactivate user'"
+                      :aria-label="user.deactivated_at ? 'Reactivate user' : 'Deactivate user'"
+                      :disabled="togglingActive.has(user.id)"
+                      @click="toggleActive(user)"
+                    >
+                      <Loader2 v-if="togglingActive.has(user.id)" class="h-4 w-4 animate-spin" />
+                      <UserCheck v-else-if="user.deactivated_at" class="h-4 w-4" />
+                      <UserX v-else class="h-4 w-4" />
+                    </Button>
+                    <Button
+                      class="shadow-none"
+                      variant="outline"
+                      size="icon"
+                      title="Delete user"
+                      aria-label="Delete user"
+                      :disabled="deletingUsers.has(user.id)"
+                      @click="deleteUser(user)"
+                    >
+                      <Loader2 v-if="deletingUsers.has(user.id)" class="h-4 w-4 animate-spin" />
+                      <Trash2 v-else class="h-4 w-4" />
                     </Button>
                   </div>
                 </TableCell>
@@ -966,7 +1137,7 @@ definePageMeta({
       <DialogHeader>
         <DialogTitle>Change Password</DialogTitle>
         <DialogDescription>
-          Set a new password for this user.
+          Set a new password for {{ selectedUser?.email }}. Let them know what it is, and ask them to change it after signing in.
         </DialogDescription>
       </DialogHeader>
       <div class="grid gap-4 py-4">
@@ -981,7 +1152,10 @@ definePageMeta({
       </div>
       <DialogFooter>
         <Button variant="outline" @click="showPasswordDialog = false">Cancel</Button>
-        <Button @click="saveNewPassword">Update Password</Button>
+        <Button :disabled="savingPassword" @click="saveNewPassword">
+          <Loader2 v-if="savingPassword" class="mr-2 h-4 w-4 animate-spin" />
+          Update Password
+        </Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>
