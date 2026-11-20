@@ -22,7 +22,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
-  MailPlus
+  MailPlus,
+  UserX,
+  UserCheck
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -227,6 +229,9 @@ const fetchUsers = async () => {
 const pendingInvites = ref<Map<string, string | null>>(new Map())
 const resendingInvites = ref<Set<string>>(new Set())
 const deletingUsers = ref<Set<string>>(new Set())
+const togglingActive = ref<Set<string>>(new Set())
+// useSupabaseUser() gives JWT claims (sub) in newer @nuxtjs/supabase versions
+const currentUserId = computed(() => user.value?.id ?? user.value?.sub)
 const savingPassword = ref(false)
 
 const fetchPendingInvites = async () => {
@@ -618,6 +623,48 @@ const addNewUser = async () => {
 }
 
 // Delete user
+// Former employees: block sign-in and claim emails, keep all their claims.
+const toggleActive = async (u) => {
+  const deactivate = !u.deactivated_at
+  const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email
+  const question = deactivate
+    ? `Deactivate ${name}? They won't be able to sign in or get claim emails. Their claims stay as they are, and you can reactivate them later.`
+    : `Reactivate ${name}? They'll be able to sign in again with their old password.`
+  if (!confirm(question)) return
+
+  togglingActive.value.add(u.id)
+  try {
+    const result = await $fetch('/api/admin/deactivate-user', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: { userId: u.id, deactivate },
+    })
+    u.deactivated_at = result.deactivatedAt
+    toast({
+      title: deactivate ? 'User deactivated' : 'User reactivated',
+      description: deactivate
+        ? `${u.email} can no longer sign in.`
+        : `${u.email} can sign in again.`,
+    })
+    if (result.noOneLeft) {
+      toast({
+        title: 'Nobody else has this role',
+        description: `${name} was the last active ${result.noOneLeft}. Give someone else that role so claims don't wait on nobody.`,
+        variant: 'destructive',
+      })
+    }
+  } catch (error) {
+    console.error('Error changing user status:', error)
+    toast({
+      title: deactivate ? 'Could not deactivate this user' : 'Could not reactivate this user',
+      description: error?.data?.statusMessage || error?.statusMessage || error?.message || 'Unknown error',
+      variant: 'destructive'
+    })
+  } finally {
+    togglingActive.value.delete(u.id)
+  }
+}
+
 // Only accounts with no claims or other history can be deleted; the server checks.
 const deleteUser = async (u) => {
   const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email
@@ -843,7 +890,7 @@ definePageMeta({
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="user in paginatedUsers" :key="user.id">
+              <TableRow v-for="user in paginatedUsers" :key="user.id" :class="{ 'text-muted-foreground': user.deactivated_at }">
                 <TableCell>
                   <div class="flex items-center gap-3">
                     <Avatar size="sm" shape="circle" class="text-white">
@@ -856,6 +903,13 @@ definePageMeta({
                       :title="`Invited ${formatInviteDate(pendingInvites.get(user.id))}, not accepted yet`"
                     >
                       Invite pending
+                    </span>
+                    <span
+                      v-if="user.deactivated_at"
+                      class="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200 whitespace-nowrap"
+                      :title="`Deactivated ${formatInviteDate(user.deactivated_at)}`"
+                    >
+                      Deactivated
                     </span>
                   </div>
                 </TableCell>
@@ -878,7 +932,7 @@ definePageMeta({
                 <TableCell>
                   <div class="flex justify-end gap-2">
                     <Button
-                      v-if="pendingInvites.has(user.id)"
+                      v-if="pendingInvites.has(user.id) && !user.deactivated_at"
                       class="shadow-none"
                       variant="outline"
                       size="icon"
@@ -894,7 +948,7 @@ definePageMeta({
                       <PenLine class="h-4 w-4" />
                     </Button>
                     <Button
-                      v-if="!pendingInvites.has(user.id)"
+                      v-if="!pendingInvites.has(user.id) && !user.deactivated_at"
                       class="shadow-none"
                       variant="outline"
                       size="icon"
@@ -903,6 +957,20 @@ definePageMeta({
                       @click="changePassword(user)"
                     >
                       <Key class="h-4 w-4" />
+                    </Button>
+                    <Button
+                      v-if="user.id !== currentUserId"
+                      class="shadow-none"
+                      variant="outline"
+                      size="icon"
+                      :title="user.deactivated_at ? 'Reactivate user' : 'Deactivate user'"
+                      :aria-label="user.deactivated_at ? 'Reactivate user' : 'Deactivate user'"
+                      :disabled="togglingActive.has(user.id)"
+                      @click="toggleActive(user)"
+                    >
+                      <Loader2 v-if="togglingActive.has(user.id)" class="h-4 w-4 animate-spin" />
+                      <UserCheck v-else-if="user.deactivated_at" class="h-4 w-4" />
+                      <UserX v-else class="h-4 w-4" />
                     </Button>
                     <Button
                       class="shadow-none"

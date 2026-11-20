@@ -197,7 +197,12 @@ export default defineEventHandler(async (event) => {
   const people = new Map<string, Person[]>()
   const peopleWithRole = async (role: string) => {
     if (!people.has(role)) {
-      const { data } = await admin.from('users').select('email, first_name, last_name, role, department').eq('role', role)
+      // Former employees who were deactivated keep their role but get no emails
+      const { data } = await admin
+        .from('users')
+        .select('email, first_name, last_name, role, department')
+        .eq('role', role)
+        .is('deactivated_at', null)
       people.set(role, (data ?? []) as Person[])
     }
     return people.get(role)!

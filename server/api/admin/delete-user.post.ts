@@ -48,7 +48,7 @@ export default defineEventHandler(async (event) => {
     const summary = inUse.map(u => `${u.count} ${u.label}`).join(', ')
     throw createError({
       statusCode: 409,
-      statusMessage: `This account has history (${summary}), so it can't be deleted without losing those records.`,
+      statusMessage: `This account has history (${summary}), so it can't be deleted without losing those records. Deactivate them instead.`,
     })
   }
 
