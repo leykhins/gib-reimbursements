@@ -21,7 +21,8 @@ import {
   XIcon,
   ChevronLeft,
   ChevronRight,
-  Filter
+  Filter,
+  MailPlus
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -219,6 +220,49 @@ const fetchUsers = async () => {
     })
   } finally {
     loading.value = false
+  }
+}
+
+// People invited who have not opened their invite link yet: id -> invited date
+const pendingInvites = ref<Map<string, string | null>>(new Map())
+const resendingInvites = ref<Set<string>>(new Set())
+
+const fetchPendingInvites = async () => {
+  try {
+    const { pending } = await $fetch('/api/admin/pending-invites', { headers: await authHeaders() })
+    pendingInvites.value = new Map(pending.map(p => [p.id, p.invitedAt]))
+  } catch (error) {
+    // The list still works without the badges, so don't block the page
+    console.error('Error loading pending invites:', error)
+  }
+}
+
+const formatInviteDate = (value: string | null) =>
+  value ? new Date(value).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : 'an unknown date'
+
+const resendInvite = async (u) => {
+  resendingInvites.value.add(u.id)
+  try {
+    await $fetch('/api/admin/resend-invite', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: { userId: u.id },
+    })
+    pendingInvites.value.set(u.id, new Date().toISOString())
+    toast({
+      title: 'Invite sent',
+      description: `A new invite link is on its way to ${u.email}. It works for 24 hours.`,
+    })
+  } catch (error) {
+    toast({
+      title: 'Could not resend the invite',
+      description: error?.data?.statusMessage || error?.statusMessage || error?.message || 'Unknown error',
+      variant: 'destructive',
+    })
+    // Their status may have changed (e.g. they accepted in the meantime)
+    fetchPendingInvites()
+  } finally {
+    resendingInvites.value.delete(u.id)
   }
 }
 
@@ -691,7 +735,7 @@ onMounted(async () => {
   await checkAdminStatus()
   if (isAdmin.value) {
     loadClaimSettings().catch(error => console.error('Error loading claim rates:', error))
-    await fetchUsers()
+    await Promise.all([fetchUsers(), fetchPendingInvites()])
   }
 })
 
@@ -784,6 +828,13 @@ definePageMeta({
                       <AvatarFallback>{{ getUserInitials(user) }}</AvatarFallback>
                     </Avatar>
                     <span class="font-medium">{{ user.first_name }} {{ user.last_name }}</span>
+                    <span
+                      v-if="pendingInvites.has(user.id)"
+                      class="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200 whitespace-nowrap"
+                      :title="`Invited ${formatInviteDate(pendingInvites.get(user.id))}, not accepted yet`"
+                    >
+                      Invite pending
+                    </span>
                   </div>
                 </TableCell>
                 <TableCell>{{ user.email }}</TableCell>
@@ -804,6 +855,19 @@ definePageMeta({
                 <TableCell>{{ new Date(user.created_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) }}</TableCell>
                 <TableCell>
                   <div class="flex justify-end gap-2">
+                    <Button
+                      v-if="pendingInvites.has(user.id)"
+                      class="shadow-none"
+                      variant="outline"
+                      size="icon"
+                      title="Resend invite"
+                      aria-label="Resend invite"
+                      :disabled="resendingInvites.has(user.id)"
+                      @click="resendInvite(user)"
+                    >
+                      <Loader2 v-if="resendingInvites.has(user.id)" class="h-4 w-4 animate-spin" />
+                      <MailPlus v-else class="h-4 w-4" />
+                    </Button>
                     <Button class="shadow-none" variant="outline" size="icon" @click="editUser(user)">
                       <PenLine class="h-4 w-4" />
                     </Button>
