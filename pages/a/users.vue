@@ -226,6 +226,8 @@ const fetchUsers = async () => {
 // People invited who have not opened their invite link yet: id -> invited date
 const pendingInvites = ref<Map<string, string | null>>(new Map())
 const resendingInvites = ref<Set<string>>(new Set())
+const deletingUsers = ref<Set<string>>(new Set())
+const savingPassword = ref(false)
 
 const fetchPendingInvites = async () => {
   try {
@@ -312,6 +314,11 @@ const paginatedUsers = computed(() => {
 // Total pages
 const totalPages = computed(() => {
   return Math.ceil(filteredUsers.value.length / itemsPerPage)
+})
+
+// Stay on a real page when the list shrinks, e.g. after deleting the last row on the last page
+watch(totalPages, (pages) => {
+  if (currentPage.value > pages) currentPage.value = Math.max(1, pages)
 })
 
 // Generate array of page numbers for pagination
@@ -497,22 +504,29 @@ const saveNewPassword = async () => {
     return
   }
   
+  // The dialog can be closed and reopened for someone else while this is in flight
+  const target = selectedUser.value
+  savingPassword.value = true
   try {
-    // This would require admin functions in Supabase or a server endpoint
-    toast({
-      title: 'Success',
-      description: 'Password updated successfully',
-      variant: 'default'
+    await $fetch('/api/admin/set-password', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: { userId: target.id, password: passwordForm.value.password },
     })
-    
-    showPasswordDialog.value = false
+    toast({
+      title: 'Password updated',
+      description: `${target.email} can now sign in with the new password.`,
+    })
+    if (selectedUser.value?.id === target.id) showPasswordDialog.value = false
   } catch (error) {
     console.error('Error updating password:', error)
     toast({
-      title: 'Error',
-      description: 'Failed to update password',
+      title: 'Could not update the password',
+      description: error?.data?.statusMessage || error?.statusMessage || error?.message || 'Unknown error',
       variant: 'destructive'
     })
+  } finally {
+    savingPassword.value = false
   }
 }
 
@@ -604,25 +618,33 @@ const addNewUser = async () => {
 }
 
 // Delete user
-const deleteUser = async (userId) => {
-  if (!confirm('Are you sure you want to delete this user?')) return
-  
+// Only accounts with no claims or other history can be deleted; the server checks.
+const deleteUser = async (u) => {
+  const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email
+  if (!confirm(`Delete ${name} (${u.email})? They will no longer be able to sign in. This can't be undone.`)) return
+
+  deletingUsers.value.add(u.id)
   try {
-    // This would require admin functions in Supabase or a server endpoint
-    toast({
-      title: 'Success',
-      description: 'User deleted successfully',
-      variant: 'default'
+    await $fetch('/api/admin/delete-user', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: { userId: u.id },
     })
-    
+    toast({
+      title: 'User deleted',
+      description: `${u.email} has been removed.`,
+    })
+    pendingInvites.value.delete(u.id)
     fetchUsers()
   } catch (error) {
     console.error('Error deleting user:', error)
     toast({
-      title: 'Error',
-      description: 'Failed to delete user',
+      title: 'Could not delete this user',
+      description: error?.data?.statusMessage || error?.statusMessage || error?.message || 'Unknown error',
       variant: 'destructive'
     })
+  } finally {
+    deletingUsers.value.delete(u.id)
   }
 }
 
@@ -871,11 +893,28 @@ definePageMeta({
                     <Button class="shadow-none" variant="outline" size="icon" @click="editUser(user)">
                       <PenLine class="h-4 w-4" />
                     </Button>
-                    <Button class="shadow-none" variant="outline" size="icon" @click="changePassword(user)">
+                    <Button
+                      v-if="!pendingInvites.has(user.id)"
+                      class="shadow-none"
+                      variant="outline"
+                      size="icon"
+                      title="Change password"
+                      aria-label="Change password"
+                      @click="changePassword(user)"
+                    >
                       <Key class="h-4 w-4" />
                     </Button>
-                    <Button class="shadow-none" variant="outline" size="icon" @click="deleteUser(user.id)">
-                      <Trash2 class="h-4 w-4" />
+                    <Button
+                      class="shadow-none"
+                      variant="outline"
+                      size="icon"
+                      title="Delete user"
+                      aria-label="Delete user"
+                      :disabled="deletingUsers.has(user.id)"
+                      @click="deleteUser(user)"
+                    >
+                      <Loader2 v-if="deletingUsers.has(user.id)" class="h-4 w-4 animate-spin" />
+                      <Trash2 v-else class="h-4 w-4" />
                     </Button>
                   </div>
                 </TableCell>
@@ -1030,7 +1069,7 @@ definePageMeta({
       <DialogHeader>
         <DialogTitle>Change Password</DialogTitle>
         <DialogDescription>
-          Set a new password for this user.
+          Set a new password for {{ selectedUser?.email }}. Let them know what it is, and ask them to change it after signing in.
         </DialogDescription>
       </DialogHeader>
       <div class="grid gap-4 py-4">
@@ -1045,7 +1084,10 @@ definePageMeta({
       </div>
       <DialogFooter>
         <Button variant="outline" @click="showPasswordDialog = false">Cancel</Button>
-        <Button @click="saveNewPassword">Update Password</Button>
+        <Button :disabled="savingPassword" @click="saveNewPassword">
+          <Loader2 v-if="savingPassword" class="mr-2 h-4 w-4 animate-spin" />
+          Update Password
+        </Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>
